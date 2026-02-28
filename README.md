@@ -11,6 +11,7 @@
 - [Requirements](#requirements)
 - [Quick Install](#quick-install)
 - [Manual Installation](#manual-installation)
+- [Project Structure](#project-structure)
 - [First Login](#first-login)
 - [User Management](#user-management)
 - [Managing Assets](#managing-assets)
@@ -22,6 +23,7 @@
 - [API Reference](#api-reference)
 - [Troubleshooting](#troubleshooting)
 - [Architecture](#architecture)
+- [Changelog](#changelog)
 - [License](#license)
 
 ---
@@ -50,8 +52,8 @@
 | **Streaming** | YouTube URLs, Vimeo URLs |
 | **Web** | Any HTTP/HTTPS URL (rendered in iframe) |
 
-> **Video thumbnails** are automatically generated using FFmpeg.  
-> **YouTube thumbnails** are fetched from YouTube's CDN.  
+> **Video thumbnails** are automatically generated using FFmpeg.
+> **YouTube thumbnails** are fetched from YouTube's CDN.
 > **Vimeo thumbnails** are fetched via Vumbnail.
 
 ---
@@ -132,6 +134,28 @@ venv/bin/gunicorn --bind 0.0.0.0:8080 --workers 2 app:app
 
 ---
 
+## Project Structure
+
+```
+lumina-signage/
+├── app.py                  # Flask application and REST API
+├── requirements.txt        # Python dependencies
+├── lumina.service          # Systemd service unit
+├── install.sh              # Ubuntu installer script
+├── uninstall.sh            # Uninstaller script
+├── templates/              # Flask HTML templates (must be this folder name)
+│   ├── index.html          # Admin dashboard SPA
+│   ├── login.html          # Login page
+│   └── player.html         # Full-screen kiosk player
+└── static/
+    └── uploads/            # Uploaded media files (auto-created)
+        └── thumbnails/     # Auto-generated video thumbnails
+```
+
+> **Important:** The `templates/` directory is required by Flask. The HTML files (`index.html`, `login.html`, `player.html`) must live inside `templates/` — not in the project root — or the application will fail to start with a `TemplateNotFound` error.
+
+---
+
 ## First Login
 
 After installation, open your browser and navigate to:
@@ -147,7 +171,7 @@ http://<your-server-ip>
 | Username | `admin` |
 | Password | `admin123` |
 
-> ⚠️ **Change the default password immediately** after your first login.  
+> ⚠️ **Change the default password immediately** after your first login.
 > Go to **Users** → click the edit icon next to admin → set a new password.
 
 ---
@@ -424,6 +448,10 @@ sudo journalctl -u nginx -n 20
 - Check that the playlist has assets
 - If using schedules, verify the current time/day matches a schedule
 
+### TemplateNotFound error on startup
+- Ensure `index.html`, `login.html`, and `player.html` are inside a `templates/` subdirectory, not the project root
+- Flask requires this folder name exactly: `templates/`
+
 ### Permission denied errors
 ```bash
 sudo chown -R lumina:lumina /opt/lumina-signage
@@ -493,6 +521,28 @@ EOF
 | **Nginx** | Reverse proxy, static file serving |
 | **FFmpeg** | Video thumbnail generation, duration detection |
 | **Systemd** | Process management, auto-restart |
+
+---
+
+## Changelog
+
+### v1.1.0
+
+**Bug Fixes**
+
+- **[Critical] TemplateNotFound on every page load** — HTML files (`index.html`, `login.html`, `player.html`) must reside in a `templates/` subdirectory. Flask's `render_template()` requires this structure; placing them in the project root caused the app to crash on startup. Added `templates/` to the project layout and documented the requirement.
+
+- **[Critical] Video items skipped twice in player** — `player.html` had both `videoEl.onended` and a `setTimeout` calling `advance()` independently. When a video finished naturally, both fired and the player skipped an extra item. Fixed by introducing a `safeAdvance()` guard (`advanceLocked` flag) so only the first caller proceeds.
+
+- **[Critical] Delete button always shown for own user account** — In the Users table, the self-check compared `u.username` against the un-evaluated string literal `'${state.user?.username}'` rather than the actual runtime value. As a result, admins could render a delete button for their own account. Fixed by comparing numeric user IDs: `u.id === state.user?.id`.
+
+- **[Medium] Playlist `updated_at` timestamp never updated** — `api_update_playlist()` did not explicitly set `updated_at`. The SQLAlchemy `onupdate` hook is unreliable with SQLite and silently skipped. Fixed by adding `pl.updated_at = datetime.utcnow()` explicitly, consistent with how `api_update_asset()` already handled it.
+
+- **[Medium] XSS injection risk in User Management table** — User data (including email and username) was passed directly into `onclick` attributes via `JSON.stringify()`. A username or email containing `'`, `"`, or `</script>` could break out of the HTML attribute context. Fixed by storing users in `state.usersById` (keyed by numeric ID) and passing only the safe integer ID into `onclick`. The `esc()` helper now also escapes single quotes (`'` → `&#39;`).
+
+- **[Minor] Unused imports in `app.py`** — Removed `hashlib`, `timedelta`, `flash`, `abort`, and `send_from_directory`, none of which were referenced anywhere in the application.
+
+- **[Minor] Pause/resume timer drift in player** — After pausing and resuming multiple times, `remaining` was calculated by subtracting elapsed time from the original `progressStart`, causing drift and negative values that made the timer fire instantly on resume. Replaced with `remainingMs` (snapshotted at each pause) and `progressStart` (reset at each resume) for correct remaining-time tracking across any number of pause cycles.
 
 ---
 

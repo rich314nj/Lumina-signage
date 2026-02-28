@@ -8,17 +8,16 @@ import os
 import re
 import json
 import uuid
-import hashlib
 import secrets
 import subprocess
 import mimetypes
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 
 from flask import (
     Flask, render_template, request, jsonify, redirect,
-    url_for, session, send_from_directory, flash, abort
+    url_for, session
 )
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
@@ -88,7 +87,7 @@ class Asset(db.Model):
     is_active = db.Column(db.Boolean, default=True)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
         return {
@@ -115,7 +114,7 @@ class Playlist(db.Model):
     loop = db.Column(db.Boolean, default=True)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
     items = db.relationship("PlaylistItem", backref="playlist", cascade="all, delete-orphan",
                             order_by="PlaylistItem.position")
 
@@ -598,6 +597,7 @@ def api_update_playlist(pl_id):
                 duration_override=item.get("duration_override")
             )
             db.session.add(pi)
+    # FIX #5: explicitly set updated_at — SQLite onupdate hook is unreliable
     pl.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(pl.to_dict())
