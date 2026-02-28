@@ -1,0 +1,22 @@
+[Unit]
+Description=LuminaCast Digital Signage
+After=network.target
+
+[Service]
+Type=simple
+User=lumina
+WorkingDirectory=/opt/lumina-signage
+Environment=PORT=8080
+Environment=SECRET_KEY=CHANGE_ME_IN_PRODUCTION
+ExecStart=/opt/lumina-signage/venv/bin/gunicorn \
+    --bind 0.0.0.0:8080 \
+    --workers 2 \
+    --timeout 120 \
+    --access-logfile /var/log/lumina/access.log \
+    --error-logfile /var/log/lumina/error.log \
+    app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
