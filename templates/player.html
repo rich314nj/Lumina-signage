@@ -120,10 +120,14 @@ let items = [];
 let currentIdx = 0;
 let timer = null;
 let paused = false;
-let remaining = 0;
 let progressInterval = null;
-let progressStart = null;
+let progressStart = null;   // timestamp of last resume
+let remainingMs = 0;        // ms left when last paused
 let totalDuration = 0;
+
+// FIX #2: track whether the duration-based timer has already fired,
+// so videoEl.onended doesn't trigger a second advance.
+let advanceLocked = false;
 
 // Elements
 const videoEl = document.getElementById('videoEl');
@@ -170,12 +174,20 @@ function hideAll() {
   iframeEl.src = '';
 }
 
+function safeAdvance() {
+  // FIX #2: guard so only the first caller (timer or onended) wins
+  if (advanceLocked) return;
+  advanceLocked = true;
+  advance();
+}
+
 function showItem(idx) {
   if (!items.length) { showEmpty(); return; }
   const item = items[idx];
   const asset = item.asset;
   const duration = (item.duration_override || asset.duration) * 1000;
   totalDuration = duration;
+  advanceLocked = false;
 
   clearTimers();
   fadeOut(async () => {
@@ -189,7 +201,7 @@ function showItem(idx) {
         imageEl.style.display = '';
         metaEl.textContent = `Image · ${duration / 1000}s`;
         startProgress(duration);
-        timer = setTimeout(() => advance(), duration);
+        timer = setTimeout(() => safeAdvance(), duration);
         break;
 
       case 'video':
@@ -198,9 +210,11 @@ function showItem(idx) {
         videoEl.muted = false;
         metaEl.textContent = `Video · ${duration / 1000}s`;
         videoEl.play().catch(() => { videoEl.muted = true; videoEl.play(); });
-        videoEl.onended = () => advance();
+        // FIX #2: onended uses safeAdvance — the duration timer below also
+        // uses safeAdvance. Only the first one to fire will actually advance.
+        videoEl.onended = () => safeAdvance();
         startProgress(duration);
-        timer = setTimeout(() => advance(), duration);
+        timer = setTimeout(() => safeAdvance(), duration);
         break;
 
       case 'youtube': {
@@ -210,7 +224,7 @@ function showItem(idx) {
         iframeEl.style.display = '';
         metaEl.textContent = `YouTube · ${duration / 1000}s`;
         startProgress(duration);
-        timer = setTimeout(() => advance(), duration);
+        timer = setTimeout(() => safeAdvance(), duration);
         break;
       }
 
@@ -221,7 +235,7 @@ function showItem(idx) {
         iframeEl.style.display = '';
         metaEl.textContent = `Vimeo · ${duration / 1000}s`;
         startProgress(duration);
-        timer = setTimeout(() => advance(), duration);
+        timer = setTimeout(() => safeAdvance(), duration);
         break;
       }
 
@@ -230,7 +244,7 @@ function showItem(idx) {
         iframeEl.style.display = '';
         metaEl.textContent = `Web · ${duration / 1000}s`;
         startProgress(duration);
-        timer = setTimeout(() => advance(), duration);
+        timer = setTimeout(() => safeAdvance(), duration);
     }
 
     fadeIn();
@@ -252,7 +266,7 @@ function prevItem() {
 }
 
 function nextItem() {
-  advance();
+  showItem((currentIdx + 1) % items.length);
 }
 
 function clearTimers() {
@@ -262,12 +276,14 @@ function clearTimers() {
 }
 
 function startProgress(duration) {
+  // FIX #7: always track remainingMs from full duration on a fresh item
+  remainingMs = duration;
   progressStart = Date.now();
-  remaining = duration;
   progressInterval = setInterval(() => {
     if (paused) return;
     const elapsed = Date.now() - progressStart;
-    const pct = Math.min((elapsed / duration) * 100, 100);
+    const consumed = duration - remainingMs + elapsed;
+    const pct = Math.min((consumed / duration) * 100, 100);
     progressBar.style.width = pct + '%';
   }, 100);
 }
@@ -278,11 +294,13 @@ function togglePause() {
   if (paused) {
     clearTimeout(timer);
     videoEl.pause();
-    remaining -= (Date.now() - progressStart);
+    // FIX #7: snapshot how much time is left at the moment of pause
+    remainingMs = Math.max(0, remainingMs - (Date.now() - progressStart));
   } else {
+    // FIX #7: resume from the correct remaining time
     progressStart = Date.now();
     videoEl.play().catch(() => {});
-    timer = setTimeout(() => advance(), remaining);
+    timer = setTimeout(() => safeAdvance(), remainingMs);
   }
 }
 
