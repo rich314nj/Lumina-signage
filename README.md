@@ -1,6 +1,6 @@
 # LuminaCast — Digital Signage Platform for Ubuntu
 
-> A self-hosted, open-source digital signage solution for Ubuntu — inspired by [Anthias/Screenly](https://github.com/Screenly/Anthias). Manage playlists, schedule content, and display media across screens from a sleek web interface.
+> A self-hosted, open-source digital signage solution for Ubuntu — inspired by [Anthias/Screenly](https://github.com/Screenly/Anthias) and others. Manage playlists, schedule content, and display media across screens from a sleek web interface.
 
 ---
 
@@ -51,6 +51,7 @@
 | **Videos** | AVI, MKV, MOV, MPG, MPEG, MP4, TS, FLV |
 | **Streaming** | YouTube URLs, Vimeo URLs |
 | **Web** | Any HTTP/HTTPS URL (rendered in iframe) |
+| **Documents** | PDF |
 
 > **Video thumbnails** are automatically generated using FFmpeg.
 > **YouTube thumbnails** are fetched from YouTube's CDN.
