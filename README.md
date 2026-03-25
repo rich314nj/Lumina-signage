@@ -47,10 +47,11 @@
 
 | Category | Formats |
 |----------|---------|
-| **Images** | JPG, JPEG, PNG, PNM, GIF, BMP, WEBP, PDF |
-| **Videos** | AVI, MKV, MOV, MPG, MPEG, MP4, TS, FLV |
+| **Images** | JPG, JPEG, PNG, GIF, BMP, WEBP |
+| **Videos** | AVI, MKV, MOV, MPG, MPEG, MP4, TS |
 | **Streaming** | YouTube URLs, Vimeo URLs |
 | **Web** | Any HTTP/HTTPS URL (rendered in iframe) |
+| **Documents** | PDF |
 
 > **Video thumbnails** are automatically generated using FFmpeg.
 > **YouTube thumbnails** are fetched from YouTube's CDN.
