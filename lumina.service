@@ -1,5 +1,5 @@
 [Unit]
-Description=LuminaCast Digital Signage
+Description=LuminaShow Digital Signage
 After=network.target
 
 [Service]

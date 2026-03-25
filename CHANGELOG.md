@@ -1,4 +1,4 @@
-# LuminaCast — Changelog
+# LuminaShow — Changelog
 
 All notable changes to this project are documented in this file.  
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
@@ -12,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Deterministic schedule resolution** — `/api/current-playlist` now evaluates active schedules in a stable order and resolves matches deterministically.
 - **Overnight schedule support** — Schedule windows that cross midnight (for example, `23:00` to `02:00`) are now handled correctly.
 - **Schedule boundary clarification** — Schedule windows are now documented and enforced as start-inclusive and end-exclusive, with a special-case interpretation of `23:59` as end-of-day coverage.
+- **Brand rename** — Application branding updated to `LuminaShow` across UI text and documentation.
 
 ### Fixed
 

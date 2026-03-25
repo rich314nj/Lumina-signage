@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LuminaCast Uninstaller
+# LuminaShow Uninstaller
 set -euo pipefail
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RESET='\033[0m'
@@ -8,7 +8,7 @@ if [[ $EUID -ne 0 ]]; then
   echo -e "${RED}Run as root: sudo bash uninstall.sh${RESET}"; exit 1
 fi
 
-echo -e "${YELLOW}This will remove LuminaCast and all its data.${RESET}"
+echo -e "${YELLOW}This will remove LuminaShow and all its data.${RESET}"
 read -rp "Are you sure? Type 'yes' to confirm: " CONFIRM
 if [[ "$CONFIRM" != "yes" ]]; then echo "Cancelled."; exit 0; fi
 
@@ -40,4 +40,4 @@ fi
 userdel lumina 2>/dev/null || true
 echo -e "${GREEN}✓${RESET} System user removed"
 
-echo -e "\n${GREEN}LuminaCast uninstalled successfully.${RESET}"
+echo -e "\n${GREEN}LuminaShow uninstalled successfully.${RESET}"

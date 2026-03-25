@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  LuminaCast Digital Signage — Installer for Ubuntu 20.04 / 22.04 / 24.04
+#  LuminaShow Digital Signage — Installer for Ubuntu 20.04 / 22.04 / 24.04
 # =============================================================================
 set -euo pipefail
 
@@ -88,7 +88,7 @@ fi
 # ── Upgrade detection ─────────────────────────────────────────────────────────
 UPGRADE=false
 if [ -f "$INSTALL_DIR/app.py" ]; then
-  warn "Existing LuminaCast installation detected at $INSTALL_DIR"
+  warn "Existing LuminaShow installation detected at $INSTALL_DIR"
   echo ""
   echo -e "  ${BOLD}Options:${RESET}"
   echo -e "    [U] Upgrade  — patch application files, keep database and uploads"
@@ -178,7 +178,7 @@ else
 fi
 
 # ── Install application ───────────────────────────────────────────────────────
-header "Installing LuminaCast application"
+header "Installing LuminaShow application"
 
 # Create directories
 mkdir -p "$INSTALL_DIR"
@@ -336,9 +336,9 @@ systemctl start lumina.service
 sleep 2
 
 if systemctl is-active --quiet lumina.service; then
-  ok "LuminaCast service started"
+  ok "LuminaShow service started"
 else
-  warn "LuminaCast service failed to start. Check: journalctl -u lumina"
+  warn "LuminaShow service failed to start. Check: journalctl -u lumina"
 fi
 
 systemctl enable nginx
@@ -377,7 +377,7 @@ cat << DONE
     • Dark / Light mode toggle — persists across sessions
     • ImageMagick PDF thumbnail generation
 
-  ${BOLD}Access LuminaCast:${RESET}
+  ${BOLD}Access LuminaShow:${RESET}
   ┌──────────────────────────────────────────────────┐
   │  URL      →  http://${SERVER_IP}
   └──────────────────────────────────────────────────┘
@@ -399,7 +399,7 @@ cat << DONE
   ║          Installation Complete! 🎉                   ║
   ╚══════════════════════════════════════════════════════╝${RESET}
 
-  ${BOLD}Access LuminaCast:${RESET}
+  ${BOLD}Access LuminaShow:${RESET}
   ┌──────────────────────────────────────────────────┐
   │  URL      →  http://${SERVER_IP}
   │  Username →  admin
