@@ -19,6 +19,13 @@
   --sidebar-w: 220px; --topbar-h: 56px;
   --transition: 0.18s cubic-bezier(0.4,0,0.2,1);
 }
+html[data-theme="light"] {
+  --bg: #f0f2f5; --surface: #ffffff; --surface2: #f4f6f9;
+  --border: #dde1e8; --border2: #c8cdd8;
+  --accent: #d4621a; --accent2: #e8751c; --accent-dim: rgba(212,98,26,0.10);
+  --text: #0a0c0f; --text2: #4a5566; --text3: #8899aa;
+  --green: #16a85e; --red: #c93333; --blue: #2e7fd4; --yellow: #c9920a;
+}
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-head); overflow: hidden; }
 ::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -37,6 +44,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .user-avatar { width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), var(--accent2)); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: white; }
 .btn-logout { font-family: var(--font-mono); font-size: 11px; color: var(--text3); background: none; border: 1px solid var(--border2); cursor: pointer; padding: 5px 12px; border-radius: var(--radius); transition: var(--transition); }
 .btn-logout:hover { color: var(--text); border-color: var(--text3); }
+.btn-theme { width: 32px; height: 32px; border-radius: var(--radius); background: var(--surface2); border: 1px solid var(--border2); cursor: pointer; font-size: 15px; display: flex; align-items: center; justify-content: center; transition: var(--transition); flex-shrink: 0; }
+.btn-theme:hover { border-color: var(--accent); background: var(--accent-dim); }
 #body { display: grid; grid-template-columns: var(--sidebar-w) 1fr; overflow: hidden; }
 #sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 12px 0; overflow-y: auto; }
 .nav-section { padding: 0 12px; margin-bottom: 4px; }
@@ -184,7 +193,7 @@ select option { background: var(--surface2); }
         <div class="logo-icon">◈</div>
         <span class="logo-text">LUMINA<span>CAST</span></span>
       </a>
-      <span class="version-badge">v1.0</span>
+      <span class="version-badge">v1.2</span>
     </div>
     <div class="topbar-right">
       <div class="user-chip">
@@ -192,6 +201,7 @@ select option { background: var(--surface2); }
         <span id="userName">Loading…</span>
         <span id="userRole" class="badge badge-orange" style="font-size:10px">—</span>
       </div>
+      <button class="btn-theme" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle dark/light mode">🌙</button>
       <button class="btn-logout" onclick="location.href='/logout'">Logout</button>
     </div>
   </header>
@@ -244,7 +254,7 @@ select option { background: var(--surface2); }
         <div class="upload-zone" id="dropZone">
           <div class="upload-icon">◧</div>
           <div class="upload-title">Drop files here to upload</div>
-          <div class="upload-hint">JPG · PNG · GIF · BMP · WEBP · PNM · MP4 · MKV · AVI · MOV · FLV · TS · MPEG</div>
+          <div class="upload-hint">JPG · PNG · GIF · BMP · WEBP · PNM · MP4 · MKV · AVI · MOV · FLV · TS · MPEG · PDF</div>
         </div>
         <div id="assetsGrid" class="asset-grid"></div>
       </div>
@@ -288,7 +298,7 @@ select option { background: var(--surface2); }
     <div class="modal-header"><div class="modal-title">Upload Asset</div><button class="modal-close" onclick="closeModal('uploadModal')">✕</button></div>
     <div class="form-grid">
       <div class="form-group"><label>Asset Name (optional)</label><input type="text" id="uploadName" placeholder="Auto-detected from filename"></div>
-      <div class="form-group"><label>File</label><input type="file" id="uploadFile" accept=".jpg,.jpeg,.png,.pnm,.gif,.bmp,.webp,.avi,.mkv,.mov,.mpg,.mpeg,.mp4,.ts,.flv" style="background:var(--surface2);border:1px solid var(--border2);padding:8px;border-radius:var(--radius);color:var(--text);width:100%"></div>
+      <div class="form-group"><label>File</label><input type="file" id="uploadFile" accept=".jpg,.jpeg,.png,.pnm,.gif,.bmp,.webp,.avi,.mkv,.mov,.mpg,.mpeg,.mp4,.ts,.flv,.pdf" style="background:var(--surface2);border:1px solid var(--border2);padding:8px;border-radius:var(--radius);color:var(--text);width:100%"></div>
     </div>
     <div class="upload-progress" id="uploadProgress"><div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div><div class="progress-text" id="progressText">Uploading…</div></div>
     <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('uploadModal')">Cancel</button><button class="btn btn-primary" onclick="doUpload()">Upload</button></div>
@@ -465,8 +475,25 @@ async function loadPage(page) {
   else if (page === 'users') await loadUsers();
 }
 
+// ── Theme ──────────────────────────────────────────────────────────────────────
+function initTheme() {
+  const saved = localStorage.getItem('lumina-theme') || 'dark';
+  applyTheme(saved);
+}
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  const btn = document.getElementById('themeToggleBtn');
+  if (btn) btn.textContent = theme === 'dark' ? '🌙' : '☀️';
+  localStorage.setItem('lumina-theme', theme);
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────────
 async function init() {
+  initTheme();
   try {
     state.user = await api('GET', '/api/me');
     document.getElementById('userName').textContent = state.user.username;
@@ -540,8 +567,8 @@ function renderAssets() {
     </div>`).join('');
 }
 
-function typeBadge(t) { return {image:'badge-green',video:'badge-blue',youtube:'badge-red',vimeo:'badge-red',url:'badge-yellow'}[t]||'badge-gray'; }
-function assetIcon(t) { return {image:'🖼️',video:'🎬',youtube:'▶',vimeo:'▶',url:'🌐'}[t]||'◧'; }
+function typeBadge(t) { return {image:'badge-green',video:'badge-blue',youtube:'badge-red',vimeo:'badge-red',url:'badge-yellow',pdf:'badge-orange'}[t]||'badge-gray'; }
+function assetIcon(t) { return {image:'🖼️',video:'🎬',youtube:'▶',vimeo:'▶',url:'🌐',pdf:'📄'}[t]||'◧'; }
 function openUploadModal() { openModal('uploadModal'); }
 function openUrlModal() { openModal('urlModal'); }
 

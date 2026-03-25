@@ -30,7 +30,8 @@ UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_IMAGE_EXT = {"jpg", "jpeg", "png", "pnm", "gif", "bmp", "webp"}
 ALLOWED_VIDEO_EXT = {"avi", "mkv", "mov", "mpg", "mpeg", "mp4", "ts", "flv"}
-ALLOWED_EXTENSIONS = ALLOWED_IMAGE_EXT | ALLOWED_VIDEO_EXT
+ALLOWED_DOC_EXT   = {"pdf"}
+ALLOWED_EXTENSIONS = ALLOWED_IMAGE_EXT | ALLOWED_VIDEO_EXT | ALLOWED_DOC_EXT
 
 MAX_CONTENT_LENGTH = 2 * 1024 * 1024 * 1024  # 2 GB
 
@@ -223,6 +224,8 @@ def get_asset_type(filename_or_url):
         return "image"
     if ext in ALLOWED_VIDEO_EXT:
         return "video"
+    if ext in ALLOWED_DOC_EXT:
+        return "pdf"
     return "url"
 
 
@@ -255,6 +258,35 @@ def generate_thumbnail(filepath, asset_id):
             return f"/static/uploads/thumbnails/{asset_id}.jpg"
     except Exception:
         pass
+    return None
+
+def generate_pdf_thumbnail(filepath, asset_id):
+    """Generate thumbnail for PDF first page using ImageMagick.
+    Tries 'magick' (ImageMagick 7, Ubuntu 22.04+) then 'convert' (ImageMagick 6).
+    Falls back gracefully if neither is installed.
+    Note: If ImageMagick is installed but PDF conversion fails, check
+    /etc/ImageMagick-*/policy.xml and ensure the PDF policy is not set to 'none'.
+    Install with: sudo apt install imagemagick
+    """
+    thumb_dir = UPLOAD_FOLDER / "thumbnails"
+    thumb_dir.mkdir(exist_ok=True)
+    thumb_path = thumb_dir / f"{asset_id}.jpg"
+    im_args = [
+        "-density", "150", f"{filepath}[0]",
+        "-resize", "400x300", "-background", "white",
+        "-flatten", str(thumb_path)
+    ]
+    # Try ImageMagick 7 binary first, fall back to ImageMagick 6
+    for binary in ("magick", "convert"):
+        try:
+            cmd = [binary] + (["convert"] if binary == "magick" else []) + im_args
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            if result.returncode == 0 and thumb_path.exists():
+                return f"/static/uploads/thumbnails/{asset_id}.jpg"
+        except FileNotFoundError:
+            continue
+        except Exception:
+            break
     return None
 
 
@@ -473,6 +505,9 @@ def api_create_asset():
         thumbnail = generate_thumbnail(save_path, asset_id)
     elif atype == "image":
         thumbnail = f"/static/uploads/{stored_name}"
+    elif atype == "pdf":
+        duration = 30  # default total duration; player spreads it evenly across pages
+        thumbnail = generate_pdf_thumbnail(save_path, asset_id)
 
     name = request.form.get("name", filename)
     asset = Asset(

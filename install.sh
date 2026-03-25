@@ -14,6 +14,22 @@ warn()  { echo -e "${YELLOW}  ⚠${RESET} $*"; }
 error() { echo -e "${RED}  ✕${RESET} $*"; exit 1; }
 header(){ echo -e "\n${BOLD}${CYAN}── $* ──${RESET}"; }
 
+# Wait for apt lock (common on Ubuntu Desktop due to unattended-upgrades)
+wait_for_apt() {
+  local waited=0
+  while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock \
+        >/dev/null 2>&1; do
+    if [ $waited -eq 0 ]; then
+      info "Waiting for apt lock (unattended-upgrades may be running)…"
+    fi
+    sleep 3
+    waited=$((waited + 3))
+    if [ $waited -ge 120 ]; then
+      error "apt lock held for >2 minutes. Run: sudo systemctl stop unattended-upgrades"
+    fi
+  done
+}
+
 # ── Banner ────────────────────────────────────────────────────────────────────
 cat << 'EOF'
 
@@ -27,7 +43,7 @@ cat << 'EOF'
   ║   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝ ║
   ║                                                      ║
   ║          C A S T   ·   Digital Signage               ║
-  ║             Ubuntu Installer  v1.0                   ║
+  ║             Ubuntu Installer  v1.2                   ║
   ╚══════════════════════════════════════════════════════╝
 
 EOF
@@ -69,8 +85,28 @@ if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
   exit 0
 fi
 
+# ── Upgrade detection ─────────────────────────────────────────────────────────
+UPGRADE=false
+if [ -f "$INSTALL_DIR/app.py" ]; then
+  warn "Existing LuminaCast installation detected at $INSTALL_DIR"
+  echo ""
+  echo -e "  ${BOLD}Options:${RESET}"
+  echo -e "    [U] Upgrade  — patch application files, keep database and uploads"
+  echo -e "    [R] Reinstall — full clean install (database and uploads will be wiped)"
+  echo -e "    [C] Cancel"
+  echo ""
+  read -rp "  Choice [U/r/c]: " INSTALL_MODE
+  INSTALL_MODE="${INSTALL_MODE:-U}"
+  case "${INSTALL_MODE^^}" in
+    U) UPGRADE=true; info "Upgrade mode — preserving database and uploads" ;;
+    R) warn "Reinstall mode — all existing data will be replaced" ;;
+    *) echo "Installation cancelled."; exit 0 ;;
+  esac
+fi
+
 # ── System packages ───────────────────────────────────────────────────────────
 header "Updating system packages"
+wait_for_apt
 apt-get update -qq
 ok "Package lists updated"
 
@@ -87,13 +123,16 @@ PACKAGES=(
   curl
   wget
   git
+  rsync
   openssl
   libssl-dev
   libjpeg-dev
   libpng-dev
   libwebp-dev
+  imagemagick
 )
 
+wait_for_apt
 apt-get install -y -qq "${PACKAGES[@]}" > /dev/null 2>&1
 ok "System packages installed"
 
@@ -104,6 +143,29 @@ if command -v ffmpeg &>/dev/null; then
 else
   warn "FFmpeg not found — video thumbnail generation will be disabled"
 fi
+
+# Verify ImageMagick and fix PDF policy (Ubuntu ships with PDF disabled by default)
+IM_BIN=""
+if command -v magick &>/dev/null; then
+  IM_BIN="magick"
+  ok "ImageMagick 7 (magick) installed — PDF thumbnails enabled"
+elif command -v convert &>/dev/null; then
+  IM_BIN="convert"
+  ok "ImageMagick 6 (convert) installed — PDF thumbnails enabled"
+else
+  warn "ImageMagick not found — PDF thumbnails will be disabled (install with: sudo apt install imagemagick)"
+fi
+
+# Ubuntu's ImageMagick policy.xml disables PDF by default — fix it
+for policy_file in /etc/ImageMagick-*/policy.xml; do
+  if [ -f "$policy_file" ]; then
+    # Change policy for PDF from "none" to "read|write"
+    if grep -q 'pattern="PDF"' "$policy_file"; then
+      sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy domain="coder" rights="read|write" pattern="PDF" />|g' "$policy_file" 2>/dev/null || true
+      ok "ImageMagick PDF policy enabled ($policy_file)"
+    fi
+  fi
+done
 
 # ── Create user ───────────────────────────────────────────────────────────────
 header "Creating application user"
@@ -126,8 +188,21 @@ ok "Created directories"
 
 # Copy application files
 if [ -d "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/app.py" ]; then
-  cp -r "$SCRIPT_DIR/." "$INSTALL_DIR/"
-  ok "Copied application files"
+  if [ "$UPGRADE" = true ]; then
+    # Upgrade: copy everything EXCEPT the database and uploads
+    info "Patching application files (preserving database and uploads)…"
+    # Stop service before patching
+    systemctl stop lumina.service 2>/dev/null || true
+    rsync -a --exclude='lumina.db' \
+              --exclude='static/uploads' \
+              --exclude='.env' \
+              --exclude='venv' \
+              "$SCRIPT_DIR/" "$INSTALL_DIR/"
+    ok "Application files patched"
+  else
+    cp -r "$SCRIPT_DIR/." "$INSTALL_DIR/"
+    ok "Copied application files"
+  fi
 else
   error "Cannot find application files. Run install.sh from the lumina-signage directory."
 fi
@@ -165,6 +240,20 @@ ok "Systemd service configured"
 # ── Nginx ─────────────────────────────────────────────────────────────────────
 header "Configuring Nginx reverse proxy"
 
+# Check for port 80 conflicts (Apache2 common on Ubuntu Desktop)
+if systemctl is-active --quiet apache2 2>/dev/null; then
+  warn "Apache2 is running and using port 80."
+  read -rp "  Stop and disable Apache2 to free port 80? [Y/n]: " STOP_APACHE
+  STOP_APACHE="${STOP_APACHE:-Y}"
+  if [[ "$STOP_APACHE" =~ ^[Yy]$ ]]; then
+    systemctl stop apache2
+    systemctl disable apache2
+    ok "Apache2 stopped and disabled"
+  else
+    warn "Leaving Apache2 running — Nginx may fail to bind port 80. You can change the port later."
+  fi
+fi
+
 cat > /etc/nginx/sites-available/lumina << NGINX
 server {
     listen 80;
@@ -195,7 +284,17 @@ NGINX
 
 # Enable site
 ln -sf /etc/nginx/sites-available/lumina /etc/nginx/sites-enabled/lumina
-rm -f /etc/nginx/sites-enabled/default
+
+# Remove default nginx site only if it exists and points to the default nginx page
+if [ -L /etc/nginx/sites-enabled/default ]; then
+  DEFAULT_TARGET=$(readlink /etc/nginx/sites-enabled/default)
+  if echo "$DEFAULT_TARGET" | grep -q "default$"; then
+    rm -f /etc/nginx/sites-enabled/default
+    ok "Removed nginx default site"
+  else
+    warn "Skipped removing nginx default site — it points to a custom config ($DEFAULT_TARGET)"
+  fi
+fi
 
 # Test nginx config
 if nginx -t -q 2>/dev/null; then
@@ -215,14 +314,18 @@ ok "Permissions set"
 # ── Initialize database ───────────────────────────────────────────────────────
 header "Initializing database"
 
-cd "$INSTALL_DIR"
-sudo -u "$APP_USER" "$INSTALL_DIR/venv/bin/python" -c "
+if [ "$UPGRADE" = true ] && [ -f "$INSTALL_DIR/lumina.db" ]; then
+  ok "Existing database preserved — skipping initialization"
+else
+  cd "$INSTALL_DIR"
+  sudo -u "$APP_USER" "$INSTALL_DIR/venv/bin/python" -c "
 import sys; sys.path.insert(0, '${INSTALL_DIR}')
 from app import init_db
 init_db()
 print('Database initialized')
 "
-ok "Database created with default admin user"
+  ok "Database created with default admin user"
+fi
 
 # ── Start services ─────────────────────────────────────────────────────────────
 header "Starting services"
@@ -262,6 +365,34 @@ fi
 SERVER_IP=$(hostname -I | awk '{print $1}')
 
 # ── Done ───────────────────────────────────────────────────────────────────────
+if [ "$UPGRADE" = true ]; then
+cat << DONE
+
+  ${GREEN}${BOLD}╔══════════════════════════════════════════════════════╗
+  ║       Upgrade to v1.2 Complete! 🎉                   ║
+  ╚══════════════════════════════════════════════════════╝${RESET}
+
+  ${BOLD}What's new in v1.2:${RESET}
+    • PDF support — upload and display PDFs page-by-page
+    • Dark / Light mode toggle — persists across sessions
+    • ImageMagick PDF thumbnail generation
+
+  ${BOLD}Access LuminaCast:${RESET}
+  ┌──────────────────────────────────────────────────┐
+  │  URL      →  http://${SERVER_IP}
+  └──────────────────────────────────────────────────┘
+
+  ${BOLD}Useful commands:${RESET}
+    Status   : sudo systemctl status lumina
+    Logs     : sudo journalctl -u lumina -f
+    Restart  : sudo systemctl restart lumina
+
+  ${BOLD}Ubuntu Desktop — open player in kiosk mode:${RESET}
+    chromium-browser --kiosk http://localhost/player
+    google-chrome    --kiosk http://localhost/player
+
+DONE
+else
 cat << DONE
 
   ${GREEN}${BOLD}╔══════════════════════════════════════════════════════╗
@@ -270,9 +401,9 @@ cat << DONE
 
   ${BOLD}Access LuminaCast:${RESET}
   ┌──────────────────────────────────────────────────┐
-  │  URL      →  http://${SERVER_IP}                  
-  │  Username →  admin                               
-  │  Password →  admin123                            
+  │  URL      →  http://${SERVER_IP}
+  │  Username →  admin
+  │  Password →  admin123
   └──────────────────────────────────────────────────┘
 
   ${YELLOW}⚠  Change the default password immediately after login!${RESET}
@@ -289,4 +420,9 @@ cat << DONE
     Logs     : ${LOG_DIR}/
     Config   : ${INSTALL_DIR}/.env
 
+  ${BOLD}Ubuntu Desktop — open player in kiosk mode:${RESET}
+    chromium-browser --kiosk http://localhost/player
+    google-chrome    --kiosk http://localhost/player
+
 DONE
+fi

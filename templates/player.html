@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lumina Player</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body {
@@ -28,6 +29,19 @@ html, body {
   width: 100%; height: 100%;
   border: none; display: none;
 }
+#pdfCanvas {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain; display: none;
+  background: white;
+}
+#pdfPageBadge {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.6); color: rgba(255,255,255,0.7);
+  padding: 4px 12px; border-radius: 99px; font-size: 11px;
+  font-family: monospace; opacity: 0; transition: opacity 0.3s;
+  z-index: 100; pointer-events: none;
+}
+#player:hover #pdfPageBadge { opacity: 1; }
 #emptyState {
   color: #333; text-align: center;
 }
@@ -90,6 +104,8 @@ html, body {
     <video id="videoEl" autoplay muted></video>
     <img id="imageEl" alt="">
     <iframe id="iframeEl" allowfullscreen allow="autoplay; fullscreen"></iframe>
+    <canvas id="pdfCanvas"></canvas>
+    <div id="pdfPageBadge">Page 1 / 1</div>
     <div id="emptyState">
       <div style="font-size:60px;margin-bottom:16px;opacity:0.2">◈</div>
       <h2 style="color:#444">No content scheduled</h2>
@@ -123,16 +139,26 @@ let paused = false;
 let progressInterval = null;
 let progressStart = null;   // timestamp of last resume
 let remainingMs = 0;        // ms left when last paused
-let totalDuration = 0;
 
 // FIX #2: track whether the duration-based timer has already fired,
 // so videoEl.onended doesn't trigger a second advance.
 let advanceLocked = false;
 
+// PDF state
+let pdfDoc = null;
+let pdfCurrentPage = 0;
+let pdfTotalPages = 0;
+let pdfPageTimer = null;
+let pdfMsPerPage = 0;
+let pdfPageStart = null;       // timestamp when current page timer started
+let pdfPageRemainingMs = null; // ms left on page tick when paused
+
 // Elements
 const videoEl = document.getElementById('videoEl');
 const imageEl = document.getElementById('imageEl');
 const iframeEl = document.getElementById('iframeEl');
+const pdfCanvas = document.getElementById('pdfCanvas');
+const pdfPageBadge = document.getElementById('pdfPageBadge');
 const emptyEl = document.getElementById('emptyState');
 const nameEl = document.getElementById('currentName');
 const metaEl = document.getElementById('currentMeta');
@@ -162,16 +188,21 @@ async function loadPlaylist() {
 
 function showEmpty() {
   hideAll();
-  emptyEl.style.display = '';
+  emptyEl.style.display = 'block';
 }
 
 function hideAll() {
   videoEl.style.display = 'none';
   imageEl.style.display = 'none';
   iframeEl.style.display = 'none';
+  pdfCanvas.style.display = 'none';
+  pdfPageBadge.style.display = 'none';
   emptyEl.style.display = 'none';
+  videoEl.onended = null;
   videoEl.src = '';
   iframeEl.src = '';
+  if (pdfPageTimer) { clearTimeout(pdfPageTimer); pdfPageTimer = null; }
+  pdfDoc = null;
 }
 
 function safeAdvance() {
@@ -186,8 +217,11 @@ function showItem(idx) {
   const item = items[idx];
   const asset = item.asset;
   const duration = (item.duration_override || asset.duration) * 1000;
-  totalDuration = duration;
   advanceLocked = false;
+
+  // Always resume when switching items, regardless of prior pause state
+  paused = false;
+  pauseBtn.textContent = '⏸';
 
   clearTimers();
   fadeOut(async () => {
@@ -198,7 +232,7 @@ function showItem(idx) {
     switch (asset.asset_type) {
       case 'image':
         imageEl.src = asset.uri;
-        imageEl.style.display = '';
+        imageEl.style.display = 'block';
         metaEl.textContent = `Image · ${duration / 1000}s`;
         startProgress(duration);
         timer = setTimeout(() => safeAdvance(), duration);
@@ -206,7 +240,7 @@ function showItem(idx) {
 
       case 'video':
         videoEl.src = asset.uri;
-        videoEl.style.display = '';
+        videoEl.style.display = 'block';
         videoEl.muted = false;
         metaEl.textContent = `Video · ${duration / 1000}s`;
         videoEl.play().catch(() => { videoEl.muted = true; videoEl.play(); });
@@ -221,18 +255,27 @@ function showItem(idx) {
         const match = asset.uri.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
         const vid = match ? match[1] : '';
         iframeEl.src = `https://www.youtube.com/embed/${vid}?autoplay=1&mute=0&controls=1&rel=0`;
-        iframeEl.style.display = '';
+        iframeEl.style.display = 'block';
         metaEl.textContent = `YouTube · ${duration / 1000}s`;
         startProgress(duration);
         timer = setTimeout(() => safeAdvance(), duration);
         break;
       }
 
+      case 'pdf':
+        pdfCanvas.style.display = 'block';
+        pdfPageBadge.style.display = 'block';
+        metaEl.textContent = `PDF · ${duration / 1000}s`;
+        startProgress(duration);
+        timer = setTimeout(() => safeAdvance(), duration);
+        loadPdf(asset.uri, duration);
+        break;
+
       case 'vimeo': {
         const match = asset.uri.match(/vimeo\.com\/(\d+)/);
         const vid = match ? match[1] : '';
         iframeEl.src = `https://player.vimeo.com/video/${vid}?autoplay=1&title=0&byline=0`;
-        iframeEl.style.display = '';
+        iframeEl.style.display = 'block';
         metaEl.textContent = `Vimeo · ${duration / 1000}s`;
         startProgress(duration);
         timer = setTimeout(() => safeAdvance(), duration);
@@ -241,7 +284,7 @@ function showItem(idx) {
 
       default:
         iframeEl.src = asset.uri;
-        iframeEl.style.display = '';
+        iframeEl.style.display = 'block';
         metaEl.textContent = `Web · ${duration / 1000}s`;
         startProgress(duration);
         timer = setTimeout(() => safeAdvance(), duration);
@@ -260,18 +303,82 @@ function advance() {
   showItem(currentIdx);
 }
 
+// ── PDF page-by-page renderer ──────────────────────────────────────────────────
+async function loadPdf(uri, totalDurationMs) {
+  // Configure PDF.js worker (uses CDN-hosted worker to avoid CORS issues)
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  try {
+    pdfDoc = await pdfjsLib.getDocument(uri).promise;
+    pdfTotalPages = pdfDoc.numPages;
+    pdfCurrentPage = 1;
+    // Divide total asset duration evenly across all pages (min 2s per page)
+    pdfMsPerPage = Math.max(2000, Math.floor(totalDurationMs / pdfTotalPages));
+    await renderPdfPage(pdfCurrentPage);
+  } catch (e) {
+    console.error('PDF load error:', e);
+    safeAdvance();
+  }
+}
+
+async function renderPdfPage(pageNum) {
+  if (!pdfDoc || pdfCanvas.style.display === 'none') return;
+  try {
+    const page = await pdfDoc.getPage(pageNum);
+    // Scale to fill the screen at device pixel ratio
+    const dpr = window.devicePixelRatio || 1;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const viewport = page.getViewport({ scale: 1 });
+    const scale = Math.min(vw / viewport.width, vh / viewport.height) * dpr;
+    const scaledViewport = page.getViewport({ scale });
+
+    pdfCanvas.width  = scaledViewport.width;
+    pdfCanvas.height = scaledViewport.height;
+    pdfCanvas.style.width  = (scaledViewport.width  / dpr) + 'px';
+    pdfCanvas.style.height = (scaledViewport.height / dpr) + 'px';
+
+    await page.render({
+      canvasContext: pdfCanvas.getContext('2d'),
+      viewport: scaledViewport
+    }).promise;
+
+    // Update page badge
+    pdfPageBadge.textContent = `Page ${pageNum} / ${pdfTotalPages}`;
+
+    // Schedule next page if there are more; otherwise let the outer timer handle advance
+    if (pageNum < pdfTotalPages) {
+      pdfPageStart = Date.now();
+      pdfPageRemainingMs = null; // reset snapshot — fresh tick
+      pdfPageTimer = setTimeout(async () => {
+        pdfCurrentPage++;
+        await renderPdfPage(pdfCurrentPage);
+      }, pdfMsPerPage);
+    }
+    // When we reach the last page we simply stay on it until safeAdvance() fires
+  } catch (e) {
+    console.error('PDF render error:', e);
+  }
+}
+
 function prevItem() {
   currentIdx = (currentIdx - 1 + items.length) % items.length;
   showItem(currentIdx);
 }
 
 function nextItem() {
-  showItem((currentIdx + 1) % items.length);
+  currentIdx = (currentIdx + 1) % items.length;
+  showItem(currentIdx);
 }
 
 function clearTimers() {
   if (timer) clearTimeout(timer);
   if (progressInterval) clearInterval(progressInterval);
+  if (pdfPageTimer) { clearTimeout(pdfPageTimer); pdfPageTimer = null; }
+  // Silence video immediately — hideAll() runs 500ms later inside fadeOut,
+  // so without this the previous video's audio plays through the black overlay.
+  videoEl.pause();
+  videoEl.muted = true;
   progressBar.style.width = '0%';
 }
 
@@ -296,11 +403,26 @@ function togglePause() {
     videoEl.pause();
     // FIX #7: snapshot how much time is left at the moment of pause
     remainingMs = Math.max(0, remainingMs - (Date.now() - progressStart));
+    // Pause PDF page advancement and snapshot remaining page time
+    if (pdfPageTimer) {
+      clearTimeout(pdfPageTimer);
+      pdfPageTimer = null;
+      // Store how much time was left on the current page tick
+      pdfPageRemainingMs = Math.max(0, pdfMsPerPage - (Date.now() - pdfPageStart));
+    }
   } else {
     // FIX #7: resume from the correct remaining time
     progressStart = Date.now();
     videoEl.play().catch(() => {});
     timer = setTimeout(() => safeAdvance(), remainingMs);
+    // Resume PDF page advancement from where it was paused
+    if (pdfDoc && pdfCurrentPage < pdfTotalPages) {
+      pdfPageStart = Date.now();
+      pdfPageTimer = setTimeout(async () => {
+        pdfCurrentPage++;
+        await renderPdfPage(pdfCurrentPage);
+      }, pdfPageRemainingMs != null ? pdfPageRemainingMs : pdfMsPerPage);
+    }
   }
 }
 

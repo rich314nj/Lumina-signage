@@ -12,6 +12,12 @@
   --text: #e8ecf0; --text2: #8899aa; --text3: #4a5566;
   --red: #e84040;
 }
+html[data-theme="light"] {
+  --bg: #f0f2f5; --surface: #ffffff; --border: #dde1e8;
+  --accent: #d4621a; --accent2: #e8751c;
+  --text: #0a0c0f; --text2: #4a5566; --text3: #8899aa;
+  --red: #c93333;
+}
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Syne', sans-serif; }
 
@@ -62,7 +68,7 @@ label {
   margin-bottom: 8px;
 }
 input {
-  width: 100%; background: rgba(255,255,255,0.04);
+  width: 100%; background: var(--surface);
   border: 1px solid var(--border); color: var(--text);
   padding: 11px 14px; border-radius: 8px;
   font-family: 'Syne', sans-serif; font-size: 14px;
@@ -100,9 +106,19 @@ input::placeholder { color: var(--text3); }
   text-align: center; margin-top: 24px;
   font-size: 11px; color: var(--text3); font-family: 'Space Mono', monospace;
 }
+.btn-theme-login {
+  position: fixed; top: 16px; right: 16px;
+  width: 34px; height: 34px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  cursor: pointer; font-size: 15px;
+  display: flex; align-items: center; justify-content: center;
+  transition: 0.18s; z-index: 10;
+}
+.btn-theme-login:hover { border-color: var(--accent); }
 </style>
 </head>
 <body>
+<button class="btn-theme-login" id="loginThemeBtn" onclick="toggleTheme()" title="Toggle dark/light mode">🌙</button>
 <div class="login-wrap">
   <div class="brand">
     <div class="brand-icon">◈</div>
@@ -137,10 +153,25 @@ input::placeholder { color: var(--text3); }
     </div>
   </div>
 
-  <div class="footer">LuminaCast v1.0 · Ubuntu Digital Signage</div>
+  <div class="footer">LuminaCast v1.2 · Ubuntu Digital Signage</div>
 </div>
 
 <script>
+// ── Theme ──────────────────────────────────────────────────────────────────────
+(function initTheme() {
+  const saved = localStorage.getItem('lumina-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  const btn = document.getElementById('loginThemeBtn');
+  if (btn) btn.textContent = saved === 'dark' ? '🌙' : '☀️';
+})();
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('lumina-theme', next);
+  document.getElementById('loginThemeBtn').textContent = next === 'dark' ? '🌙' : '☀️';
+}
+
 document.getElementById('loginForm').addEventListener('submit', async e => {
   e.preventDefault();
   const btn = document.getElementById('loginBtn');
