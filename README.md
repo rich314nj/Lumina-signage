@@ -339,7 +339,8 @@ You'll be asked whether to delete uploaded media files.
 
 ## API Reference
 
-All API endpoints require authentication (session cookie from login).
+All API endpoints require authentication (session cookie from login), except
+`GET /api/current-playlist`, which is intentionally unauthenticated for kiosk clients.
 
 ### Authentication
 
@@ -537,23 +538,7 @@ EOF
 
 ## Changelog
 
-### v1.1.0
-
-**Bug Fixes**
-
-- **[Critical] TemplateNotFound on every page load** — HTML files (`index.html`, `login.html`, `player.html`) must reside in a `templates/` subdirectory. Flask's `render_template()` requires this structure; placing them in the project root caused the app to crash on startup. Added `templates/` to the project layout and documented the requirement.
-
-- **[Critical] Video items skipped twice in player** — `player.html` had both `videoEl.onended` and a `setTimeout` calling `advance()` independently. When a video finished naturally, both fired and the player skipped an extra item. Fixed by introducing a `safeAdvance()` guard (`advanceLocked` flag) so only the first caller proceeds.
-
-- **[Critical] Delete button always shown for own user account** — In the Users table, the self-check compared `u.username` against the un-evaluated string literal `'${state.user?.username}'` rather than the actual runtime value. As a result, admins could render a delete button for their own account. Fixed by comparing numeric user IDs: `u.id === state.user?.id`.
-
-- **[Medium] Playlist `updated_at` timestamp never updated** — `api_update_playlist()` did not explicitly set `updated_at`. The SQLAlchemy `onupdate` hook is unreliable with SQLite and silently skipped. Fixed by adding `pl.updated_at = datetime.utcnow()` explicitly, consistent with how `api_update_asset()` already handled it.
-
-- **[Medium] XSS injection risk in User Management table** — User data (including email and username) was passed directly into `onclick` attributes via `JSON.stringify()`. A username or email containing `'`, `"`, or `</script>` could break out of the HTML attribute context. Fixed by storing users in `state.usersById` (keyed by numeric ID) and passing only the safe integer ID into `onclick`. The `esc()` helper now also escapes single quotes (`'` → `&#39;`).
-
-- **[Minor] Unused imports in `app.py`** — Removed `hashlib`, `timedelta`, `flash`, `abort`, and `send_from_directory`, none of which were referenced anywhere in the application.
-
-- **[Minor] Pause/resume timer drift in player** — After pausing and resuming multiple times, `remaining` was calculated by subtracting elapsed time from the original `progressStart`, causing drift and negative values that made the timer fire instantly on resume. Replaced with `remainingMs` (snapshotted at each pause) and `progressStart` (reset at each resume) for correct remaining-time tracking across any number of pause cycles.
+For full release history and fixes, see [`CHANGELOG.md`](./CHANGELOG.md).
 
 ---
 
@@ -564,3 +549,4 @@ MIT License — see `LICENSE` for details.
 ---
 
 *LuminaShow is inspired by [Anthias (Screenly)](https://github.com/Screenly/Anthias) — an excellent open-source digital signage project.*
+

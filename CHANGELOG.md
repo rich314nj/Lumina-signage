@@ -13,6 +13,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Overnight schedule support** — Schedule windows that cross midnight (for example, `23:00` to `02:00`) are now handled correctly.
 - **Schedule boundary clarification** — Schedule windows are now documented and enforced as start-inclusive and end-exclusive, with a special-case interpretation of `23:59` as end-of-day coverage.
 - **Brand rename** — Application branding updated to `LuminaShow` across UI text and documentation.
+- **README API auth clarification** — API docs now explicitly note that `GET /api/current-playlist` is intentionally unauthenticated for kiosk clients.
+- **README changelog cleanup** — Removed stale embedded release notes from `README.md` and linked directly to `CHANGELOG.md` as the canonical release history.
 
 ### Fixed
 
@@ -23,6 +25,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **[Medium] Duplicate email update could trigger server error** — `PUT /api/users/<id>` now validates email uniqueness (excluding the current user) and returns `409` conflict with a clear error message.
 - **[Medium] YouTube links misclassified as generic URLs** — Asset type detection now uses the hardened YouTube ID parser, so valid YouTube variants (`watch`, `youtu.be`, `embed`, `shorts`, `live`, `/v/`) are correctly stored as `youtube`.
 - **[Medium] Vimeo URL parsing in player was too narrow** — Player now supports multiple Vimeo URL formats (`vimeo.com/<id>`, `player.vimeo.com/video/<id>`, and nested path variants) and safely skips invalid Vimeo links.
+- **[Medium] Vimeo links could be misclassified in backend** — Backend `extract_vimeo_id()` now supports player-style Vimeo URL variants, improving URL asset classification and thumbnail selection.
+- **[Low] Invalid user role updates were silently ignored** — `PUT /api/users/<id>` now returns `400` when `role` is provided with an unsupported value instead of ignoring it.
 
 ---
 

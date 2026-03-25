@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Lumina Signage - Digital Signage Platform for Ubuntu
+LuminaShow - Digital Signage Platform for Ubuntu
 Similar to Anthias/Screenly
 """
 
@@ -338,7 +338,23 @@ def extract_youtube_id(url):
 
 
 def extract_vimeo_id(url):
-    m = re.search(r"vimeo\.com/(\d+)", url)
+    if not isinstance(url, str) or not url:
+        return None
+
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname.lower() if parsed.hostname else ""
+        path_parts = [p for p in (parsed.path or "").split("/") if p]
+        if host.endswith("vimeo.com"):
+            # Supports vimeo.com/<id>, player.vimeo.com/video/<id>,
+            # and nested variants containing the numeric id.
+            for part in path_parts:
+                if re.fullmatch(r"\d+", part):
+                    return part
+    except Exception:
+        pass
+
+    m = re.search(r"vimeo\.com/(?:.*/)?(\d+)", str(url), re.IGNORECASE)
     return m.group(1) if m else None
 
 
@@ -548,7 +564,9 @@ def api_update_user(uid):
         if existing:
             return jsonify({"error": "Email already exists"}), 409
         user.email = new_email
-    if "role" in data and data["role"] in ("admin", "editor", "viewer"):
+    if "role" in data:
+        if data["role"] not in ("admin", "editor", "viewer"):
+            return jsonify({"error": "Invalid role"}), 400
         user.role = data["role"]
     if "is_active" in data:
         user.is_active = bool(data["is_active"])
