@@ -209,6 +209,11 @@ def current_user():
 
 # ── Utility Functions ──────────────────────────────────────────────────────────
 
+def get_json_dict():
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
+
+
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
@@ -528,7 +533,9 @@ def api_update_user(uid):
     user = db.session.get(User, uid)
     if not user:
         return jsonify({"error": "User not found"}), 404
-    data = request.get_json()
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
     if "email" in data:
         user.email = data["email"]
     if "role" in data and data["role"] in ("admin", "editor", "viewer"):
@@ -570,7 +577,9 @@ def api_assets():
 def api_create_asset():
     # URL asset
     if request.is_json:
-        data = request.get_json()
+        data = get_json_dict()
+        if not data:
+            return jsonify({"error": "Invalid or missing JSON body"}), 400
         uri = data.get("uri", "").strip()
         if not uri:
             return jsonify({"error": "URI required"}), 400
@@ -651,7 +660,9 @@ def api_update_asset(asset_id):
     asset = db.session.get(Asset, asset_id)
     if not asset:
         return jsonify({"error": "Not found"}), 404
-    data = request.get_json()
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
     if "name" in data:
         asset.name = data["name"]
     if "duration" in data:
@@ -697,7 +708,9 @@ def api_playlists():
 @login_required
 @role_required("admin", "editor")
 def api_create_playlist():
-    data = request.get_json()
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
     name = data.get("name", "New Playlist").strip()
     playlist = Playlist(
         name=name,
@@ -726,7 +739,9 @@ def api_update_playlist(pl_id):
     pl = db.session.get(Playlist, pl_id)
     if not pl:
         return jsonify({"error": "Not found"}), 404
-    data = request.get_json()
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
     if "name" in data:
         pl.name = data["name"]
     if "description" in data:
@@ -777,7 +792,9 @@ def api_schedules():
 @login_required
 @role_required("admin", "editor")
 def api_create_schedule():
-    data = request.get_json()
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
     pl_id = data.get("playlist_id")
     if not pl_id or not db.session.get(Playlist, pl_id):
         return jsonify({"error": "Valid playlist_id required"}), 400
@@ -822,7 +839,9 @@ def api_update_schedule(sch_id):
     s = db.session.get(Schedule, sch_id)
     if not s:
         return jsonify({"error": "Not found"}), 404
-    data = request.get_json()
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
     new_name = data.get("name", s.name)
     new_start_time = data.get("start_time", s.start_time)
     new_end_time = data.get("end_time", s.end_time)

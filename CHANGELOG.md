@@ -17,6 +17,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **[High] Schedule overlap ambiguity** — Active schedules are now validated to prevent overlapping day/time windows on create and update. API returns `409` on overlap conflicts.
 - **[High] YouTube player invalid parameter failures** — Player-side YouTube ID extraction now supports `watch`, `youtu.be`, `embed`, `shorts`, `live`, and `/v/` URL formats, with invalid links safely skipped.
 - **[Medium] YouTube thumbnail extraction gaps** — Backend `extract_youtube_id()` now supports the same URL formats as the player so thumbnail generation works consistently.
+- **[Medium] Invalid JSON request crashes on write APIs** — Added shared JSON body validation for update/create endpoints so malformed or missing JSON now returns clean `400` responses instead of unhandled `500` errors.
 
 ---
 
