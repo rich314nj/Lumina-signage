@@ -270,6 +270,8 @@ Schedules control which playlist plays at what time.
 
 - The player checks active schedules every 5 minutes
 - The first schedule matching the current day and time wins
+- Time windows are interpreted as **start-inclusive, end-exclusive** (for example, `08:00` to `12:00` runs up to but not including `12:00`)
+- Use `23:59` as end time to run through the end of day
 - If no schedule matches, the first active playlist plays as a fallback
 - Multiple schedules can run different playlists throughout the day
 

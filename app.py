@@ -219,11 +219,12 @@ def allowed_file(filename):
 
 
 def get_asset_type(filename_or_url):
-    if re.match(r"https?://(www\.)?(youtube\.com|youtu\.be)/", filename_or_url):
-        return "youtube"
-    if re.match(r"https?://(www\.)?vimeo\.com/", filename_or_url):
-        return "vimeo"
     if filename_or_url.startswith(("http://", "https://")):
+        # Keep type detection aligned with robust ID extraction logic.
+        if extract_youtube_id(filename_or_url):
+            return "youtube"
+        if extract_vimeo_id(filename_or_url):
+            return "vimeo"
         return "url"
     ext = filename_or_url.rsplit(".", 1)[-1].lower() if "." in filename_or_url else ""
     if ext in ALLOWED_IMAGE_EXT:
@@ -386,7 +387,10 @@ def schedule_to_day_intervals(start_min, end_min, days_csv):
             # start == end means full-day coverage for that day.
             out.append((day_idx, 0, 1440))
         elif start_min < end_min:
-            out.append((day_idx, start_min, end_min))
+            # Use half-open intervals [start, end) for deterministic boundaries.
+            # Special-case 23:59 as end-of-day so "to end of day" includes the last minute.
+            end_exclusive = 1440 if end_min == 1439 else end_min
+            out.append((day_idx, start_min, end_exclusive))
         else:
             # Overnight split (e.g. 23:00-02:00) across day boundary.
             out.append((day_idx, start_min, 1440))
@@ -537,7 +541,13 @@ def api_update_user(uid):
     if not data:
         return jsonify({"error": "Invalid or missing JSON body"}), 400
     if "email" in data:
-        user.email = data["email"]
+        new_email = data["email"].strip()
+        if not new_email:
+            return jsonify({"error": "Email cannot be empty"}), 400
+        existing = User.query.filter(User.email == new_email, User.id != uid).first()
+        if existing:
+            return jsonify({"error": "Email already exists"}), 409
+        user.email = new_email
     if "role" in data and data["role"] in ("admin", "editor", "viewer"):
         user.role = data["role"]
     if "is_active" in data:

@@ -203,6 +203,29 @@ function extractYouTubeId(url) {
   return m ? m[1] : null;
 }
 
+function extractVimeoId(url) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '').toLowerCase();
+    const pathParts = (u.pathname || '').split('/').filter(Boolean);
+    if (host.endsWith('vimeo.com')) {
+      // Supports:
+      // vimeo.com/<id>
+      // player.vimeo.com/video/<id>
+      // vimeo.com/channels/<name>/<id>, /groups/<name>/videos/<id>, etc.
+      for (const part of pathParts) {
+        if (/^\d+$/.test(part)) return part;
+      }
+    }
+  } catch (_) {
+    // Fall through to regex-based parsing below.
+  }
+
+  const m = String(url).match(/vimeo\.com\/(?:.*\/)?(\d+)/i);
+  return m ? m[1] : null;
+}
+
 async function loadPlaylist() {
   const urlParams = new URLSearchParams(window.location.search);
   const playlistId = urlParams.get('playlist');
@@ -313,8 +336,12 @@ function showItem(idx) {
         break;
 
       case 'vimeo': {
-        const match = asset.uri.match(/vimeo\.com\/(\d+)/);
-        const vid = match ? match[1] : '';
+        const vid = extractVimeoId(asset.uri);
+        if (!vid) {
+          metaEl.textContent = 'Vimeo · Invalid URL';
+          timer = setTimeout(() => safeAdvance(), 1000);
+          break;
+        }
         iframeEl.src = `https://player.vimeo.com/video/${vid}?autoplay=1&title=0&byline=0`;
         iframeEl.style.display = 'block';
         metaEl.textContent = `Vimeo · ${duration / 1000}s`;

@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Deterministic schedule resolution** — `/api/current-playlist` now evaluates active schedules in a stable order and resolves matches deterministically.
 - **Overnight schedule support** — Schedule windows that cross midnight (for example, `23:00` to `02:00`) are now handled correctly.
+- **Schedule boundary clarification** — Schedule windows are now documented and enforced as start-inclusive and end-exclusive, with a special-case interpretation of `23:59` as end-of-day coverage.
 
 ### Fixed
 
@@ -18,6 +19,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **[High] YouTube player invalid parameter failures** — Player-side YouTube ID extraction now supports `watch`, `youtu.be`, `embed`, `shorts`, `live`, and `/v/` URL formats, with invalid links safely skipped.
 - **[Medium] YouTube thumbnail extraction gaps** — Backend `extract_youtube_id()` now supports the same URL formats as the player so thumbnail generation works consistently.
 - **[Medium] Invalid JSON request crashes on write APIs** — Added shared JSON body validation for update/create endpoints so malformed or missing JSON now returns clean `400` responses instead of unhandled `500` errors.
+- **[Medium] Duplicate email update could trigger server error** — `PUT /api/users/<id>` now validates email uniqueness (excluding the current user) and returns `409` conflict with a clear error message.
+- **[Medium] YouTube links misclassified as generic URLs** — Asset type detection now uses the hardened YouTube ID parser, so valid YouTube variants (`watch`, `youtu.be`, `embed`, `shorts`, `live`, `/v/`) are correctly stored as `youtube`.
+- **[Medium] Vimeo URL parsing in player was too narrow** — Player now supports multiple Vimeo URL formats (`vimeo.com/<id>`, `player.vimeo.com/video/<id>`, and nested path variants) and safely skips invalid Vimeo links.
 
 ---
 
