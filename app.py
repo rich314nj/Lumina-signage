@@ -14,6 +14,7 @@ import mimetypes
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlparse, parse_qs
 
 from flask import (
     Flask, render_template, request, jsonify, redirect,
@@ -291,15 +292,42 @@ def generate_pdf_thumbnail(filepath, asset_id):
 
 
 def extract_youtube_id(url):
-    patterns = [
-        r"youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})",
-        r"youtu\.be/([a-zA-Z0-9_-]{11})",
-        r"youtube\.com/embed/([a-zA-Z0-9_-]{11})",
-    ]
-    for p in patterns:
-        m = re.search(p, url)
-        if m:
-            return m.group(1)
+    if not isinstance(url, str) or not url:
+        return None
+
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname.lower() if parsed.hostname else ""
+        path = parsed.path or ""
+
+        # youtu.be/<id>
+        if host in ("youtu.be", "www.youtu.be"):
+            candidate = path.strip("/").split("/")[0] if path.strip("/") else ""
+            if re.fullmatch(r"[a-zA-Z0-9_-]{11}", candidate):
+                return candidate
+
+        # youtube.com/watch?...&v=<id>
+        if host in ("youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com"):
+            v = parse_qs(parsed.query).get("v", [None])[0]
+            if v and re.fullmatch(r"[a-zA-Z0-9_-]{11}", v):
+                return v
+
+            # /embed/<id>, /shorts/<id>, /live/<id>, /v/<id>
+            parts = [p for p in path.split("/") if p]
+            if len(parts) >= 2 and parts[0] in ("embed", "shorts", "live", "v"):
+                candidate = parts[1]
+                if re.fullmatch(r"[a-zA-Z0-9_-]{11}", candidate):
+                    return candidate
+    except Exception:
+        pass
+
+    # Fallback for malformed URLs or plain text.
+    m = re.search(
+        r"(?:youtube\.com/(?:watch\?.*?[?&]v=|embed/|shorts/|live/|v/)|youtu\.be/)([a-zA-Z0-9_-]{11})",
+        str(url),
+    )
+    if m:
+        return m.group(1)
     return None
 
 
@@ -309,6 +337,92 @@ def extract_vimeo_id(url):
 
 
 # ── Page Routes ────────────────────────────────────────────────────────────────
+
+DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+DAY_TO_INDEX = {d: i for i, d in enumerate(DAY_ORDER)}
+
+
+def parse_hhmm_to_min(hhmm):
+    if not isinstance(hhmm, str) or not re.fullmatch(r"\d{2}:\d{2}", hhmm):
+        return None
+    h, m = hhmm.split(":")
+    h_i, m_i = int(h), int(m)
+    if not (0 <= h_i <= 23 and 0 <= m_i <= 59):
+        return None
+    return h_i * 60 + m_i
+
+
+def normalize_days(days_csv):
+    if not isinstance(days_csv, str):
+        return None
+    parts = [p.strip().lower() for p in days_csv.split(",") if p.strip()]
+    if not parts:
+        return None
+    uniq = []
+    seen = set()
+    for p in parts:
+        if p not in DAY_TO_INDEX:
+            return None
+        if p not in seen:
+            uniq.append(p)
+            seen.add(p)
+    return ",".join(uniq)
+
+
+def schedule_to_day_intervals(start_min, end_min, days_csv):
+    """Return normalized day intervals as (day_idx, start_min, end_min_exclusive)."""
+    days = normalize_days(days_csv)
+    if days is None:
+        return None
+    out = []
+    for day in days.split(","):
+        day_idx = DAY_TO_INDEX[day]
+        if start_min == end_min:
+            # start == end means full-day coverage for that day.
+            out.append((day_idx, 0, 1440))
+        elif start_min < end_min:
+            out.append((day_idx, start_min, end_min))
+        else:
+            # Overnight split (e.g. 23:00-02:00) across day boundary.
+            out.append((day_idx, start_min, 1440))
+            out.append(((day_idx + 1) % 7, 0, end_min))
+    return out
+
+
+def intervals_overlap(a_start, a_end, b_start, b_end):
+    # Half-open intervals allow touching boundaries (e.g. 10:00-12:00 and 12:00-14:00).
+    return max(a_start, b_start) < min(a_end, b_end)
+
+
+def find_overlapping_schedule(candidate_intervals, schedules):
+    for s in schedules:
+        s_start = parse_hhmm_to_min(s.start_time)
+        s_end = parse_hhmm_to_min(s.end_time)
+        if s_start is None or s_end is None:
+            continue
+        existing_intervals = schedule_to_day_intervals(s_start, s_end, s.days)
+        if existing_intervals is None:
+            continue
+        for c_day, c_start, c_end in candidate_intervals:
+            for e_day, e_start, e_end in existing_intervals:
+                if c_day == e_day and intervals_overlap(c_start, c_end, e_start, e_end):
+                    return s
+    return None
+
+
+def schedule_match_interval_for_now(schedule, now_day_idx, now_min):
+    s_start = parse_hhmm_to_min(schedule.start_time)
+    s_end = parse_hhmm_to_min(schedule.end_time)
+    if s_start is None or s_end is None:
+        return None
+    intervals = schedule_to_day_intervals(s_start, s_end, schedule.days)
+    if intervals is None:
+        return None
+    for day_idx, i_start, i_end in intervals:
+        if day_idx == now_day_idx and i_start <= now_min < i_end:
+            return i_start, i_end
+    return None
+
 
 @app.route("/")
 def index():
@@ -667,12 +781,34 @@ def api_create_schedule():
     pl_id = data.get("playlist_id")
     if not pl_id or not db.session.get(Playlist, pl_id):
         return jsonify({"error": "Valid playlist_id required"}), 400
+    start_time = data.get("start_time", "00:00")
+    end_time = data.get("end_time", "23:59")
+    days = data.get("days", "mon,tue,wed,thu,fri,sat,sun")
+    start_min = parse_hhmm_to_min(start_time)
+    end_min = parse_hhmm_to_min(end_time)
+    if start_min is None or end_min is None:
+        return jsonify({"error": "start_time and end_time must be HH:MM (24-hour)"}), 400
+    days_norm = normalize_days(days)
+    if days_norm is None:
+        return jsonify({"error": "days must be comma-separated mon,tue,wed,thu,fri,sat,sun"}), 400
+
+    # Overlap policy: active schedules must not overlap.
+    candidate_intervals = schedule_to_day_intervals(start_min, end_min, days_norm)
+    active_schedules = Schedule.query.filter_by(is_active=True).all()
+    overlapping = find_overlapping_schedule(candidate_intervals, active_schedules)
+    if overlapping:
+        return jsonify({
+            "error": (
+                f"Schedule overlaps with existing active schedule '{overlapping.name or overlapping.id}'"
+            )
+        }), 409
+
     s = Schedule(
         playlist_id=pl_id,
         name=data.get("name", "Schedule"),
-        start_time=data.get("start_time", "00:00"),
-        end_time=data.get("end_time", "23:59"),
-        days=data.get("days", "mon,tue,wed,thu,fri,sat,sun"),
+        start_time=start_time,
+        end_time=end_time,
+        days=days_norm,
     )
     db.session.add(s)
     db.session.commit()
@@ -687,11 +823,41 @@ def api_update_schedule(sch_id):
     if not s:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json()
-    for field in ("name", "start_time", "end_time", "days"):
-        if field in data:
-            setattr(s, field, data[field])
+    new_name = data.get("name", s.name)
+    new_start_time = data.get("start_time", s.start_time)
+    new_end_time = data.get("end_time", s.end_time)
+    new_days = data.get("days", s.days)
+    new_is_active = bool(data["is_active"]) if "is_active" in data else s.is_active
+
+    new_start_min = parse_hhmm_to_min(new_start_time)
+    new_end_min = parse_hhmm_to_min(new_end_time)
+    if new_start_min is None or new_end_min is None:
+        return jsonify({"error": "start_time and end_time must be HH:MM (24-hour)"}), 400
+
+    new_days_norm = normalize_days(new_days)
+    if new_days_norm is None:
+        return jsonify({"error": "days must be comma-separated mon,tue,wed,thu,fri,sat,sun"}), 400
+
+    if new_is_active:
+        candidate_intervals = schedule_to_day_intervals(new_start_min, new_end_min, new_days_norm)
+        active_schedules = Schedule.query.filter(
+            Schedule.is_active.is_(True),
+            Schedule.id != sch_id,
+        ).all()
+        overlapping = find_overlapping_schedule(candidate_intervals, active_schedules)
+        if overlapping:
+            return jsonify({
+                "error": (
+                    f"Schedule overlaps with existing active schedule '{overlapping.name or overlapping.id}'"
+                )
+            }), 409
+
+    s.name = new_name
+    s.start_time = new_start_time
+    s.end_time = new_end_time
+    s.days = new_days_norm
     if "is_active" in data:
-        s.is_active = bool(data["is_active"])
+        s.is_active = new_is_active
     db.session.commit()
     return jsonify(s.to_dict())
 
@@ -736,22 +902,40 @@ def api_stats():
 def api_current_playlist():
     """Return the currently scheduled playlist or the first active one."""
     now = datetime.now()
-    current_time = now.strftime("%H:%M")
-    day_map = {0: "mon", 1: "tue", 2: "wed", 3: "thu", 4: "fri", 5: "sat", 6: "sun"}
-    today = day_map[now.weekday()]
+    now_day_idx = now.weekday()
+    now_min = now.hour * 60 + now.minute
 
-    # Find matching schedule
-    schedules = Schedule.query.filter_by(is_active=True).all()
+    # Deterministic scheduler:
+    # 1) Sort by start_time asc, then id asc for stable ordering.
+    # 2) Match using normalized day intervals with overnight support.
+    # 3) Explicit overlap fallback for legacy data: latest interval start wins.
+    schedules = (
+        Schedule.query
+        .filter_by(is_active=True)
+        .order_by(Schedule.start_time.asc(), Schedule.id.asc())
+        .all()
+    )
+
+    matches = []
     for s in schedules:
-        days = s.days.split(",")
-        if today in days:
-            if s.start_time <= current_time <= s.end_time:
-                pl = db.session.get(Playlist, s.playlist_id)
-                if pl and pl.is_active:
-                    return jsonify(pl.to_dict())
+        interval = schedule_match_interval_for_now(s, now_day_idx, now_min)
+        if interval is None:
+            continue
+        pl = db.session.get(Playlist, s.playlist_id)
+        if pl and pl.is_active:
+            matches.append((s, pl, interval))
+
+    if matches:
+        matches.sort(key=lambda t: (-t[2][0], t[0].id))
+        return jsonify(matches[0][1].to_dict())
 
     # Fallback: first active playlist
-    pl = Playlist.query.filter_by(is_active=True).first()
+    pl = (
+        Playlist.query
+        .filter_by(is_active=True)
+        .order_by(Playlist.created_at.asc(), Playlist.id.asc())
+        .first()
+    )
     if pl:
         return jsonify(pl.to_dict())
     return jsonify(None)

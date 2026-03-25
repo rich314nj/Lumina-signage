@@ -167,6 +167,42 @@ const progressBar = document.getElementById('progressBar');
 const pauseBtn = document.getElementById('pauseBtn');
 const fadeOverlay = document.getElementById('fadeOverlay');
 
+function extractYouTubeId(url) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '').toLowerCase();
+    const path = u.pathname || '';
+
+    // youtu.be/<id>
+    if (host === 'youtu.be') {
+      const id = path.split('/').filter(Boolean)[0] || '';
+      return /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null;
+    }
+
+    // youtube.com/watch?...&v=<id>
+    if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
+      const v = u.searchParams.get('v');
+      if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v;
+
+      // youtube.com/embed/<id>, /shorts/<id>, /live/<id>, /v/<id>
+      const parts = path.split('/').filter(Boolean);
+      if (parts.length >= 2 && ['embed', 'shorts', 'live', 'v'].includes(parts[0])) {
+        const id = parts[1];
+        return /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null;
+      }
+    }
+  } catch (_) {
+    // Fall through to regex-based parsing below.
+  }
+
+  // Non-URL / malformed fallback parsing.
+  const m = String(url).match(
+    /(?:youtube\.com\/(?:watch\?.*?[?&]v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
+  );
+  return m ? m[1] : null;
+}
+
 async function loadPlaylist() {
   const urlParams = new URLSearchParams(window.location.search);
   const playlistId = urlParams.get('playlist');
@@ -252,8 +288,13 @@ function showItem(idx) {
         break;
 
       case 'youtube': {
-        const match = asset.uri.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-        const vid = match ? match[1] : '';
+        const vid = extractYouTubeId(asset.uri);
+        if (!vid) {
+          metaEl.textContent = 'YouTube · Invalid URL';
+          // Avoid loading a broken YouTube iframe with empty/invalid video id.
+          timer = setTimeout(() => safeAdvance(), 1000);
+          break;
+        }
         iframeEl.src = `https://www.youtube.com/embed/${vid}?autoplay=1&mute=0&controls=1&rel=0`;
         iframeEl.style.display = 'block';
         metaEl.textContent = `YouTube · ${duration / 1000}s`;

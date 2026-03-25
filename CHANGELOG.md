@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.3.0] — 2026-03-25
+
+### Changed
+
+- **Deterministic schedule resolution** — `/api/current-playlist` now evaluates active schedules in a stable order and resolves matches deterministically.
+- **Overnight schedule support** — Schedule windows that cross midnight (for example, `23:00` to `02:00`) are now handled correctly.
+
+### Fixed
+
+- **[High] Schedule overlap ambiguity** — Active schedules are now validated to prevent overlapping day/time windows on create and update. API returns `409` on overlap conflicts.
+- **[High] YouTube player invalid parameter failures** — Player-side YouTube ID extraction now supports `watch`, `youtu.be`, `embed`, `shorts`, `live`, and `/v/` URL formats, with invalid links safely skipped.
+- **[Medium] YouTube thumbnail extraction gaps** — Backend `extract_youtube_id()` now supports the same URL formats as the player so thumbnail generation works consistently.
+
+---
+
 ## [1.2.0] — 2026-03-24
 
 ### Added

@@ -2,6 +2,14 @@
 
 > A self-hosted, open-source digital signage solution for Ubuntu — inspired by [Anthias/Screenly](https://github.com/Screenly/Anthias) and others. Manage playlists, schedule content, and display media across screens from a sleek web interface.
 
+## Latest Release (v1.3.0)
+
+- Deterministic schedule resolution with overnight schedule support
+- Active schedule overlap prevention on create/update
+- Hardened YouTube parsing in player and backend thumbnail extraction
+
+See full details in the [v1.3.0 changelog](./CHANGELOG.md#130--2026-03-25).
+
 ---
 
 ## Table of Contents
