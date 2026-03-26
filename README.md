@@ -1,4 +1,4 @@
-# LuminaCast — Digital Signage Platform for Ubuntu
+# LuminaShow — Digital Signage Platform for Ubuntu
 
 > A self-hosted, open-source digital signage solution for Ubuntu — inspired by [Anthias/Screenly](https://github.com/Screenly/Anthias). Manage playlists, schedule content, and display media across screens from a sleek web interface.
 
@@ -180,7 +180,7 @@ http://<your-server-ip>
 
 ## User Management
 
-LuminaCast has three user roles:
+LuminaShow has three user roles:
 
 | Role | Permissions |
 |------|-------------|
@@ -300,7 +300,7 @@ Example autostart for Raspberry Pi / Ubuntu kiosk:
 # /etc/xdg/autostart/lumina-player.desktop
 [Desktop Entry]
 Type=Application
-Name=LuminaCast Player
+Name=LuminaShow Player
 Exec=chromium-browser --kiosk --noerrdialogs --disable-infobars http://localhost/player
 ```
 
@@ -567,4 +567,5 @@ MIT License — see `LICENSE` for details.
 
 ---
 
-*LuminaCast is inspired by [Anthias (Screenly)](https://github.com/Screenly/Anthias) — an excellent open-source digital signage project.*
+*LuminaShow is inspired by [Anthias (Screenly)](https://github.com/Screenly/Anthias) — an excellent open-source digital signage project.*
+
