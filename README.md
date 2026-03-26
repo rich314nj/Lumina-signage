@@ -1,14 +1,6 @@
-# LuminaShow — Digital Signage Platform for Ubuntu
+# LuminaCast — Digital Signage Platform for Ubuntu
 
-> A self-hosted, open-source digital signage solution for Ubuntu — inspired by [Anthias/Screenly](https://github.com/Screenly/Anthias) and others. Manage playlists, schedule content, and display media across screens from a sleek web interface.
-
-## Latest Release (v1.3.0)
-
-- Deterministic schedule resolution with overnight schedule support
-- Active schedule overlap prevention on create/update
-- Hardened YouTube parsing in player and backend thumbnail extraction
-
-See full details in the [v1.3.0 changelog](./CHANGELOG.md#130--2026-03-25).
+> A self-hosted, open-source digital signage solution for Ubuntu — inspired by [Anthias/Screenly](https://github.com/Screenly/Anthias). Manage playlists, schedule content, and display media across screens from a sleek web interface.
 
 ---
 
@@ -55,15 +47,16 @@ See full details in the [v1.3.0 changelog](./CHANGELOG.md#130--2026-03-25).
 
 | Category | Formats |
 |----------|---------|
-| **Images** | JPG, JPEG, PNG, GIF, BMP, WEBP |
-| **Videos** | AVI, MKV, MOV, MPG, MPEG, MP4, TS |
+| **Images** | JPG, JPEG, PNG, PNM, GIF, BMP, WEBP |
+| **Videos** | AVI, MKV, MOV, MPG, MPEG, MP4, TS, FLV |
 | **Streaming** | YouTube URLs, Vimeo URLs |
 | **Web** | Any HTTP/HTTPS URL (rendered in iframe) |
-| **Documents** | PDF |
+| **Documents** | PDF (page-by-page auto-advance) |
 
 > **Video thumbnails** are automatically generated using FFmpeg.
 > **YouTube thumbnails** are fetched from YouTube's CDN.
 > **Vimeo thumbnails** are fetched via Vumbnail.
+> **PDF thumbnails** are generated from the first page using ImageMagick (`sudo apt install imagemagick`).
 
 ---
 
@@ -187,7 +180,7 @@ http://<your-server-ip>
 
 ## User Management
 
-LuminaShow has three user roles:
+LuminaCast has three user roles:
 
 | Role | Permissions |
 |------|-------------|
@@ -270,8 +263,6 @@ Schedules control which playlist plays at what time.
 
 - The player checks active schedules every 5 minutes
 - The first schedule matching the current day and time wins
-- Time windows are interpreted as **start-inclusive, end-exclusive** (for example, `08:00` to `12:00` runs up to but not including `12:00`)
-- Use `23:59` as end time to run through the end of day
 - If no schedule matches, the first active playlist plays as a fallback
 - Multiple schedules can run different playlists throughout the day
 
@@ -309,7 +300,7 @@ Example autostart for Raspberry Pi / Ubuntu kiosk:
 # /etc/xdg/autostart/lumina-player.desktop
 [Desktop Entry]
 Type=Application
-Name=LuminaShow Player
+Name=LuminaCast Player
 Exec=chromium-browser --kiosk --noerrdialogs --disable-infobars http://localhost/player
 ```
 
@@ -339,8 +330,7 @@ You'll be asked whether to delete uploaded media files.
 
 ## API Reference
 
-All API endpoints require authentication (session cookie from login), except
-`GET /api/current-playlist`, which is intentionally unauthenticated for kiosk clients.
+All API endpoints require authentication (session cookie from login).
 
 ### Authentication
 
@@ -455,6 +445,19 @@ sudo journalctl -u nginx -n 20
 - Verify FFmpeg: `ffmpeg -version`
 - Check logs for ffprobe errors: `sudo journalctl -u lumina -f`
 
+### PDF thumbnails not generating
+- Install ImageMagick: `sudo apt install imagemagick`
+- Ubuntu ships with PDF processing disabled in ImageMagick's policy. The installer fixes this automatically, but if installing manually run:
+```bash
+sudo sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy domain="coder" rights="read|write" pattern="PDF" />|g' /etc/ImageMagick-*/policy.xml
+```
+- Verify ImageMagick is working: `magick --version` (IM7) or `convert --version` (IM6)
+
+### PDF not displaying in player
+- Ensure the browser can reach `cdnjs.cloudflare.com` (PDF.js is loaded from CDN)
+- Check browser console for CORS or network errors
+- PDF playback requires an internet connection for the PDF.js library
+
 ### Player shows "No content scheduled"
 - Ensure at least one playlist is marked **Active**
 - Check that the playlist has assets
@@ -538,7 +541,23 @@ EOF
 
 ## Changelog
 
-For full release history and fixes, see [`CHANGELOG.md`](./CHANGELOG.md).
+### v1.1.0
+
+**Bug Fixes**
+
+- **[Critical] TemplateNotFound on every page load** — HTML files (`index.html`, `login.html`, `player.html`) must reside in a `templates/` subdirectory. Flask's `render_template()` requires this structure; placing them in the project root caused the app to crash on startup. Added `templates/` to the project layout and documented the requirement.
+
+- **[Critical] Video items skipped twice in player** — `player.html` had both `videoEl.onended` and a `setTimeout` calling `advance()` independently. When a video finished naturally, both fired and the player skipped an extra item. Fixed by introducing a `safeAdvance()` guard (`advanceLocked` flag) so only the first caller proceeds.
+
+- **[Critical] Delete button always shown for own user account** — In the Users table, the self-check compared `u.username` against the un-evaluated string literal `'${state.user?.username}'` rather than the actual runtime value. As a result, admins could render a delete button for their own account. Fixed by comparing numeric user IDs: `u.id === state.user?.id`.
+
+- **[Medium] Playlist `updated_at` timestamp never updated** — `api_update_playlist()` did not explicitly set `updated_at`. The SQLAlchemy `onupdate` hook is unreliable with SQLite and silently skipped. Fixed by adding `pl.updated_at = datetime.utcnow()` explicitly, consistent with how `api_update_asset()` already handled it.
+
+- **[Medium] XSS injection risk in User Management table** — User data (including email and username) was passed directly into `onclick` attributes via `JSON.stringify()`. A username or email containing `'`, `"`, or `</script>` could break out of the HTML attribute context. Fixed by storing users in `state.usersById` (keyed by numeric ID) and passing only the safe integer ID into `onclick`. The `esc()` helper now also escapes single quotes (`'` → `&#39;`).
+
+- **[Minor] Unused imports in `app.py`** — Removed `hashlib`, `timedelta`, `flash`, `abort`, and `send_from_directory`, none of which were referenced anywhere in the application.
+
+- **[Minor] Pause/resume timer drift in player** — After pausing and resuming multiple times, `remaining` was calculated by subtracting elapsed time from the original `progressStart`, causing drift and negative values that made the timer fire instantly on resume. Replaced with `remainingMs` (snapshotted at each pause) and `progressStart` (reset at each resume) for correct remaining-time tracking across any number of pause cycles.
 
 ---
 
@@ -548,5 +567,4 @@ MIT License — see `LICENSE` for details.
 
 ---
 
-*LuminaShow is inspired by [Anthias (Screenly)](https://github.com/Screenly/Anthias) — an excellent open-source digital signage project.*
-
+*LuminaCast is inspired by [Anthias (Screenly)](https://github.com/Screenly/Anthias) — an excellent open-source digital signage project.*
