@@ -1,6 +1,6 @@
-# LuminaShow — Digital Signage Platform for Ubuntu
+﻿# LuminaShow â€” Digital Signage Platform for Raspberry Pi OS
 
-> A self-hosted, open-source digital signage solution for Ubuntu — inspired by [Anthias/Screenly](https://github.com/Screenly/Anthias). Manage playlists, schedule content, and display media across screens from a sleek web interface.
+> A self-hosted, open-source digital signage solution for Raspberry Pi OS â€” inspired by [Anthias/Screenly](https://github.com/Screenly/Anthias). Manage playlists, schedule content, and display media across screens from a sleek web interface.
 
 ---
 
@@ -30,16 +30,16 @@
 
 ## Features
 
-- **Drag-and-drop asset management** — upload files directly from your browser
-- **Rich media support** — images, videos, web URLs, YouTube, and Vimeo
-- **Playlist builder** — drag to reorder, per-item duration override
-- **Schedule engine** — set playlists to play on specific days and time ranges
-- **Full-screen player** — smooth fade transitions, keyboard shortcuts, auto-advance
-- **Role-based access control** — Admin, Editor, and Viewer roles
-- **Nginx reverse proxy** — production-ready setup out of the box
-- **Systemd service** — auto-starts on boot, auto-restarts on failure
-- **REST API** — full API for automation and custom integrations
-- **No cloud required** — 100% self-hosted
+- **Drag-and-drop asset management** â€” upload files directly from your browser
+- **Rich media support** â€” images, videos, web URLs, YouTube, and Vimeo
+- **Playlist builder** â€” drag to reorder, per-item duration override
+- **Schedule engine** â€” set playlists to play on specific days and time ranges
+- **Full-screen player** â€” smooth fade transitions, keyboard shortcuts, auto-advance
+- **Role-based access control** â€” Admin, Editor, and Viewer roles
+- **Nginx reverse proxy** â€” production-ready setup out of the box
+- **Systemd service** â€” auto-starts on boot, auto-restarts on failure
+- **REST API** â€” full API for automation and custom integrations
+- **No cloud required** â€” 100% self-hosted
 
 ---
 
@@ -64,7 +64,7 @@
 
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
-| OS | Ubuntu 20.04 LTS | Ubuntu 22.04 / 24.04 LTS |
+| OS | Raspberry Pi OS Bookworm (64-bit) | Raspberry Pi OS Bookworm (64-bit) |
 | CPU | 1 core | 2+ cores |
 | RAM | 512 MB | 2 GB+ |
 | Disk | 10 GB | 50 GB+ (for media storage) |
@@ -77,11 +77,11 @@
 
 ```bash
 # 1. Clone or download
-git clone https://github.com/yourorg/lumina-signage.git
-cd lumina-signage
+git clone https://github.com/rich314nj/LuminaShow_RPi.git
+cd LuminaShow_RPi
 
 # 2. Run installer as root
-sudo bash install.sh
+sudo bash install_rpi.sh
 ```
 
 The installer will:
@@ -130,7 +130,7 @@ venv/bin/gunicorn --bind 0.0.0.0:8080 --workers 2 app:app
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SECRET_KEY` | Random | Flask session secret — **change in production** |
+| `SECRET_KEY` | Random | Flask session secret â€” **change in production** |
 | `PORT` | `8080` | Port to listen on |
 | `DEBUG` | `false` | Enable Flask debug mode |
 
@@ -140,21 +140,21 @@ venv/bin/gunicorn --bind 0.0.0.0:8080 --workers 2 app:app
 
 ```
 lumina-signage/
-├── app.py                  # Flask application and REST API
-├── requirements.txt        # Python dependencies
-├── lumina.service          # Systemd service unit
-├── install.sh              # Ubuntu installer script
-├── uninstall.sh            # Uninstaller script
-├── templates/              # Flask HTML templates (must be this folder name)
-│   ├── index.html          # Admin dashboard SPA
-│   ├── login.html          # Login page
-│   └── player.html         # Full-screen kiosk player
-└── static/
-    └── uploads/            # Uploaded media files (auto-created)
-        └── thumbnails/     # Auto-generated video thumbnails
+â”œâ”€â”€ app.py                  # Flask application and REST API
+â”œâ”€â”€ requirements.txt        # Python dependencies
+â”œâ”€â”€ lumina.service          # Systemd service unit
+â”œâ”€â”€ install_rpi.sh          # Raspberry Pi installer script
+â”œâ”€â”€ uninstall.sh            # Uninstaller script
+â”œâ”€â”€ templates/              # Flask HTML templates (must be this folder name)
+â”‚   â”œâ”€â”€ index.html          # Admin dashboard SPA
+â”‚   â”œâ”€â”€ login.html          # Login page
+â”‚   â””â”€â”€ player.html         # Full-screen kiosk player
+â””â”€â”€ static/
+    â””â”€â”€ uploads/            # Uploaded media files (auto-created)
+        â””â”€â”€ thumbnails/     # Auto-generated video thumbnails
 ```
 
-> **Important:** The `templates/` directory is required by Flask. The HTML files (`index.html`, `login.html`, `player.html`) must live inside `templates/` — not in the project root — or the application will fail to start with a `TemplateNotFound` error.
+> **Important:** The `templates/` directory is required by Flask. The HTML files (`index.html`, `login.html`, `player.html`) must live inside `templates/` â€” not in the project root â€” or the application will fail to start with a `TemplateNotFound` error.
 
 ---
 
@@ -173,8 +173,8 @@ http://<your-server-ip>
 | Username | `admin` |
 | Password | `admin123` |
 
-> ⚠️ **Change the default password immediately** after your first login.
-> Go to **Users** → click the edit icon next to admin → set a new password.
+> âš ï¸ **Change the default password immediately** after your first login.
+> Go to **Users** â†’ click the edit icon next to admin â†’ set a new password.
 
 ---
 
@@ -184,9 +184,9 @@ LuminaShow has three user roles:
 
 | Role | Permissions |
 |------|-------------|
-| **Admin** | Full access — users, assets, playlists, schedules |
+| **Admin** | Full access â€” users, assets, playlists, schedules |
 | **Editor** | Manage assets, playlists, and schedules (no user management) |
-| **Viewer** | Read-only access — view dashboard and player |
+| **Viewer** | Read-only access â€” view dashboard and player |
 
 ### Adding a user
 
@@ -197,7 +197,7 @@ LuminaShow has three user roles:
 
 ### Editing a user
 
-Click the **✎** edit icon next to any user. You can change their email, role, active status, and password.
+Click the **âœŽ** edit icon next to any user. You can change their email, role, active status, and password.
 
 ### Disabling a user
 
@@ -210,36 +210,36 @@ Toggle the "Account Active" switch when editing a user. Disabled users cannot lo
 ### Uploading Files
 
 1. Go to **Assets**
-2. Click **↑ Upload File** or drag files directly onto the upload zone
+2. Click **â†‘ Upload File** or drag files directly onto the upload zone
 3. Multiple files can be dropped at once
 
 ### Adding URLs / YouTube / Vimeo
 
 1. Click **+ Add URL**
 2. Paste any URL:
-   - `https://example.com/page` — web page
-   - `https://www.youtube.com/watch?v=...` — YouTube video
-   - `https://vimeo.com/123456789` — Vimeo video
+   - `https://example.com/page` â€” web page
+   - `https://www.youtube.com/watch?v=...` â€” YouTube video
+   - `https://vimeo.com/123456789` â€” Vimeo video
 3. Set a display duration (seconds)
 4. Click **Add Asset**
 
 ### Editing Assets
 
-Click **✎** on any asset card to rename it or adjust its default duration.
+Click **âœŽ** on any asset card to rename it or adjust its default duration.
 
 ### Deleting Assets
 
-Click **✕** on any asset card. Files are permanently deleted from disk.
+Click **âœ•** on any asset card. Files are permanently deleted from disk.
 
 ---
 
 ## Creating Playlists
 
-1. Go to **Playlists** → **+ New Playlist**
+1. Go to **Playlists** â†’ **+ New Playlist**
 2. Enter a name and click OK
 3. In the editor:
    - **Add assets** from the right panel by clicking **+**
-   - **Reorder** items by dragging the ⠿ handle
+   - **Reorder** items by dragging the â ¿ handle
    - **Override duration** per item using the numeric input
    - Toggle **Loop** to repeat the playlist continuously
    - Toggle **Active** to enable/disable the playlist
@@ -251,12 +251,12 @@ Click **✕** on any asset card. Files are permanently deleted from disk.
 
 Schedules control which playlist plays at what time.
 
-1. Go to **Schedules** → **+ New Schedule**
+1. Go to **Schedules** â†’ **+ New Schedule**
 2. Configure:
-   - **Name** — e.g., "Morning Lobby Loop"
-   - **Playlist** — which playlist to play
-   - **Start/End Time** — time range (24-hour format)
-   - **Days** — select active days of the week
+   - **Name** â€” e.g., "Morning Lobby Loop"
+   - **Playlist** â€” which playlist to play
+   - **Start/End Time** â€” time range (24-hour format)
+   - **Days** â€” select active days of the week
 3. Click **Save Schedule**
 
 ### How scheduling works
@@ -276,8 +276,8 @@ Access the full-screen player at `http://<server>/player`
 
 | Key | Action |
 |-----|--------|
-| `→` | Next item |
-| `←` | Previous item |
+| `â†’` | Next item |
+| `â†` | Previous item |
 | `Space` | Pause / Resume |
 | `F` | Toggle fullscreen |
 
@@ -295,7 +295,7 @@ For a dedicated display, configure your browser to:
 1. Open `http://<server>/player` on startup
 2. Enable kiosk mode (e.g., `chromium-browser --kiosk http://...`)
 
-Example autostart for Raspberry Pi / Ubuntu kiosk:
+Example autostart for Raspberry Pi kiosk:
 ```bash
 # /etc/xdg/autostart/lumina-player.desktop
 [Desktop Entry]
@@ -447,7 +447,7 @@ sudo journalctl -u nginx -n 20
 
 ### PDF thumbnails not generating
 - Install ImageMagick: `sudo apt install imagemagick`
-- Ubuntu ships with PDF processing disabled in ImageMagick's policy. The installer fixes this automatically, but if installing manually run:
+- Raspberry Pi OS (Bookworm) may ship with PDF processing disabled in ImageMagick's policy. The installer fixes this automatically, but if installing manually run:
 ```bash
 sudo sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy domain="coder" rights="read|write" pattern="PDF" />|g' /etc/ImageMagick-*/policy.xml
 ```
@@ -491,39 +491,39 @@ EOF
 ## Architecture
 
 ```
-┌────────────────────────────────────────────┐
-│                  Browser                   │
-│  Admin UI (SPA)    │    Player (fullscreen) │
-└──────────┬─────────────────────┬───────────┘
-           │ HTTP                │ HTTP
-           ▼                     ▼
-┌────────────────────────────────────────────┐
-│            Nginx (Port 80)                 │
-│  • Reverse proxy to Gunicorn               │
-│  • Serves /static/ directly                │
-│  • 2GB upload support                      │
-└──────────────────┬─────────────────────────┘
-                   │
-                   ▼
-┌────────────────────────────────────────────┐
-│    Gunicorn (127.0.0.1:8080)               │
-│    Flask Application (app.py)              │
-│  ┌─────────────────────────────────────┐   │
-│  │  Routes: /, /login, /player         │   │
-│  │  API: /api/assets /api/playlists    │   │
-│  │        /api/schedules /api/users    │   │
-│  └─────────────────────────────────────┘   │
-│  ┌──────────────┐  ┌────────────────────┐  │
-│  │  SQLite DB   │  │  FFmpeg / FFprobe  │  │
-│  │  lumina.db   │  │  (thumbnails)      │  │
-│  └──────────────┘  └────────────────────┘  │
-└────────────────────────────────────────────┘
-           │
-           ▼
-┌────────────────────────────────────────────┐
-│       /opt/lumina-signage/static/uploads/  │
-│       (Images, Videos, Thumbnails)         │
-└────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚                  Browser                   â”‚
+â”‚  Admin UI (SPA)    â”‚    Player (fullscreen) â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+           â”‚ HTTP                â”‚ HTTP
+           â–¼                     â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚            Nginx (Port 80)                 â”‚
+â”‚  â€¢ Reverse proxy to Gunicorn               â”‚
+â”‚  â€¢ Serves /static/ directly                â”‚
+â”‚  â€¢ 2GB upload support                      â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+                   â”‚
+                   â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚    Gunicorn (127.0.0.1:8080)               â”‚
+â”‚    Flask Application (app.py)              â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”‚
+â”‚  â”‚  Routes: /, /login, /player         â”‚   â”‚
+â”‚  â”‚  API: /api/assets /api/playlists    â”‚   â”‚
+â”‚  â”‚        /api/schedules /api/users    â”‚   â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚
+â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”‚
+â”‚  â”‚  SQLite DB   â”‚  â”‚  FFmpeg / FFprobe  â”‚  â”‚
+â”‚  â”‚  lumina.db   â”‚  â”‚  (thumbnails)      â”‚  â”‚
+â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+           â”‚
+           â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚       /opt/lumina-signage/static/uploads/  â”‚
+â”‚       (Images, Videos, Thumbnails)         â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 ### Components
@@ -545,27 +545,33 @@ EOF
 
 **Bug Fixes**
 
-- **[Critical] TemplateNotFound on every page load** — HTML files (`index.html`, `login.html`, `player.html`) must reside in a `templates/` subdirectory. Flask's `render_template()` requires this structure; placing them in the project root caused the app to crash on startup. Added `templates/` to the project layout and documented the requirement.
+- **[Critical] TemplateNotFound on every page load** â€” HTML files (`index.html`, `login.html`, `player.html`) must reside in a `templates/` subdirectory. Flask's `render_template()` requires this structure; placing them in the project root caused the app to crash on startup. Added `templates/` to the project layout and documented the requirement.
 
-- **[Critical] Video items skipped twice in player** — `player.html` had both `videoEl.onended` and a `setTimeout` calling `advance()` independently. When a video finished naturally, both fired and the player skipped an extra item. Fixed by introducing a `safeAdvance()` guard (`advanceLocked` flag) so only the first caller proceeds.
+- **[Critical] Video items skipped twice in player** â€” `player.html` had both `videoEl.onended` and a `setTimeout` calling `advance()` independently. When a video finished naturally, both fired and the player skipped an extra item. Fixed by introducing a `safeAdvance()` guard (`advanceLocked` flag) so only the first caller proceeds.
 
-- **[Critical] Delete button always shown for own user account** — In the Users table, the self-check compared `u.username` against the un-evaluated string literal `'${state.user?.username}'` rather than the actual runtime value. As a result, admins could render a delete button for their own account. Fixed by comparing numeric user IDs: `u.id === state.user?.id`.
+- **[Critical] Delete button always shown for own user account** â€” In the Users table, the self-check compared `u.username` against the un-evaluated string literal `'${state.user?.username}'` rather than the actual runtime value. As a result, admins could render a delete button for their own account. Fixed by comparing numeric user IDs: `u.id === state.user?.id`.
 
-- **[Medium] Playlist `updated_at` timestamp never updated** — `api_update_playlist()` did not explicitly set `updated_at`. The SQLAlchemy `onupdate` hook is unreliable with SQLite and silently skipped. Fixed by adding `pl.updated_at = datetime.utcnow()` explicitly, consistent with how `api_update_asset()` already handled it.
+- **[Medium] Playlist `updated_at` timestamp never updated** â€” `api_update_playlist()` did not explicitly set `updated_at`. The SQLAlchemy `onupdate` hook is unreliable with SQLite and silently skipped. Fixed by adding `pl.updated_at = datetime.utcnow()` explicitly, consistent with how `api_update_asset()` already handled it.
 
-- **[Medium] XSS injection risk in User Management table** — User data (including email and username) was passed directly into `onclick` attributes via `JSON.stringify()`. A username or email containing `'`, `"`, or `</script>` could break out of the HTML attribute context. Fixed by storing users in `state.usersById` (keyed by numeric ID) and passing only the safe integer ID into `onclick`. The `esc()` helper now also escapes single quotes (`'` → `&#39;`).
+- **[Medium] XSS injection risk in User Management table** â€” User data (including email and username) was passed directly into `onclick` attributes via `JSON.stringify()`. A username or email containing `'`, `"`, or `</script>` could break out of the HTML attribute context. Fixed by storing users in `state.usersById` (keyed by numeric ID) and passing only the safe integer ID into `onclick`. The `esc()` helper now also escapes single quotes (`'` â†’ `&#39;`).
 
-- **[Minor] Unused imports in `app.py`** — Removed `hashlib`, `timedelta`, `flash`, `abort`, and `send_from_directory`, none of which were referenced anywhere in the application.
+- **[Minor] Unused imports in `app.py`** â€” Removed `hashlib`, `timedelta`, `flash`, `abort`, and `send_from_directory`, none of which were referenced anywhere in the application.
 
-- **[Minor] Pause/resume timer drift in player** — After pausing and resuming multiple times, `remaining` was calculated by subtracting elapsed time from the original `progressStart`, causing drift and negative values that made the timer fire instantly on resume. Replaced with `remainingMs` (snapshotted at each pause) and `progressStart` (reset at each resume) for correct remaining-time tracking across any number of pause cycles.
+- **[Minor] Pause/resume timer drift in player** â€” After pausing and resuming multiple times, `remaining` was calculated by subtracting elapsed time from the original `progressStart`, causing drift and negative values that made the timer fire instantly on resume. Replaced with `remainingMs` (snapshotted at each pause) and `progressStart` (reset at each resume) for correct remaining-time tracking across any number of pause cycles.
 
 ---
 
 ## License
 
-MIT License — see `LICENSE` for details.
+MIT License â€” see `LICENSE` for details.
 
 ---
 
-*LuminaShow is inspired by [Anthias (Screenly)](https://github.com/Screenly/Anthias) — an excellent open-source digital signage project.*
+*LuminaShow is inspired by [Anthias (Screenly)](https://github.com/Screenly/Anthias) â€” an excellent open-source digital signage project.*
+
+
+## Raspberry Pi 4/5
+
+Raspberry Pi install and image-build instructions are documented in `docs/RASPBERRY_PI.md`.
+
 

@@ -1,0 +1,132 @@
+name: Pi Image CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/pi-image-ci.yml"
+      - "install_rpi.sh"
+      - "image/**"
+      - "requirements.txt"
+      - "app.py"
+  pull_request:
+    paths:
+      - ".github/workflows/pi-image-ci.yml"
+      - "install_rpi.sh"
+      - "image/**"
+      - "requirements.txt"
+      - "app.py"
+  schedule:
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      full_build:
+        description: "Run full pi-gen image build"
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  smoke:
+    name: Script Smoke Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure shell scripts are executable
+        run: |
+          chmod +x install_rpi.sh
+          chmod +x image/pi-gen/build-image.sh
+          chmod +x image/pi-gen/stage-lumina/01-lumina/00-run.sh
+
+      - name: Normalize line endings for shell validation
+        run: |
+          sed -i 's/\r$//' install_rpi.sh
+          sed -i 's/\r$//' image/pi-gen/build-image.sh
+          sed -i 's/\r$//' image/pi-gen/stage-lumina/01-lumina/00-run.sh
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Bash syntax checks
+        run: |
+          bash -n install_rpi.sh
+          bash -n image/pi-gen/build-image.sh
+          bash -n image/pi-gen/stage-lumina/01-lumina/00-run.sh
+
+      - name: Shellcheck
+        run: |
+          shellcheck install_rpi.sh
+          shellcheck image/pi-gen/build-image.sh
+          shellcheck image/pi-gen/stage-lumina/01-lumina/00-run.sh
+
+  build-image:
+    name: Build Raspberry Pi Image
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    if: >
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_dispatch' || inputs.full_build == true)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static p7zip-full
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
+      - name: Build image with pi-gen
+        env:
+          IMG_NAME: lumina-rpi-ci-${{ github.run_number }}
+          RELEASE: bookworm
+          ARCH: arm64
+          DEPLOY_ZIP: 1
+          TARGET_HOSTNAME: lumina-ci
+          FIRST_USER_NAME: pi
+          FIRST_USER_PASS: lumina
+          ENABLE_SSH: 1
+        run: |
+          chmod +x image/pi-gen/build-image.sh
+          sed -i 's/\r$//' image/pi-gen/build-image.sh
+          ./image/pi-gen/build-image.sh
+
+      - name: Verify image artifact exists
+        id: verify
+        run: |
+          DEPLOY_DIR=".build/pi-gen/pi-gen/deploy"
+          ls -lah "$DEPLOY_DIR"
+          IMAGE_ARCHIVE="$(find "$DEPLOY_DIR" -maxdepth 1 -type f \( -name '*.zip' -o -name '*.img' -o -name '*.img.xz' \) | head -n 1)"
+          if [[ -z "$IMAGE_ARCHIVE" ]]; then
+            echo "No deploy artifact produced."
+            exit 1
+          fi
+          echo "image_archive=$IMAGE_ARCHIVE" >> "$GITHUB_OUTPUT"
+
+      - name: Basic artifact integrity check
+        run: |
+          IMAGE_ARCHIVE="${{ steps.verify.outputs.image_archive }}"
+          echo "Validating: $IMAGE_ARCHIVE"
+          if [[ "$IMAGE_ARCHIVE" == *.zip ]]; then
+            7z l "$IMAGE_ARCHIVE"
+            7z l "$IMAGE_ARCHIVE" | grep -E '\.img(\.xz)?$' > /dev/null
+          elif [[ "$IMAGE_ARCHIVE" == *.img || "$IMAGE_ARCHIVE" == *.img.xz ]]; then
+            ls -lh "$IMAGE_ARCHIVE"
+          else
+            echo "Unexpected artifact type: $IMAGE_ARCHIVE"
+            exit 1
+          fi
+
+      - name: Upload image artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumina-rpi-image-${{ github.run_number }}
+          path: .build/pi-gen/pi-gen/deploy/*
+          if-no-files-found: error
+          retention-days: 14
