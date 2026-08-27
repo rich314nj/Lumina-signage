@@ -29,7 +29,8 @@ What it shows depends on how the device is connected:
 address, e.g. `http://192.168.1.42`. Open that from any computer or phone on
 the same network, sign in, and start adding content.
 
-**If it has no network** it starts its own WiFi hotspot and tells you:
+**If it has no network and no Ethernet cable** it starts its own WiFi hotspot
+and tells you:
 
 | | |
 |---|---|
@@ -40,6 +41,11 @@ the same network, sign in, and start adding content.
 Connect a phone or laptop to that hotspot, open the address, sign in, go to
 **Network**, and pick your WiFi network. The device joins it, the hotspot
 disappears, and the screen updates with its new address.
+
+> The hotspot is strictly a fallback for wireless-only sites. If an Ethernet
+> cable is plugged in, it never appears — even while the wired connection is
+> still waiting for a DHCP address — and plugging a cable in later shuts it
+> down. Disable it entirely with `--no-setup-ap` at install time.
 
 > Default web login is `admin` / `admin123`. Change it under **Users** right
 > after the first sign-in.

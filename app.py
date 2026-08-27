@@ -1020,6 +1020,23 @@ def local_ipv4_addresses():
     return addrs
 
 
+def wired_link_present():
+    """True when an Ethernet cable is connected, even without an address yet."""
+    try:
+        for iface in os.listdir("/sys/class/net"):
+            if not iface.startswith(("eth", "en")):
+                continue
+            try:
+                with open(f"/sys/class/net/{iface}/carrier", encoding="utf-8") as fh:
+                    if fh.read().strip() == "1":
+                        return True
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return False
+
+
 def setup_ap_status():
     """Details of the fallback hotspot, when it is currently broadcasting."""
     if not network_supported():
@@ -1050,6 +1067,7 @@ def api_device_info():
     return jsonify({
         "hostname": socket.gethostname(),
         "addresses": local_ipv4_addresses(),
+        "wired_link": wired_link_present(),
         "setup_ap": setup_ap_status(),
     })
 

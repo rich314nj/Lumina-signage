@@ -16,7 +16,7 @@ CONF_FILE="/etc/lumina/setup-ap.env"
 AP_SSID="${LUMINA_AP_SSID:-LuminaShow-Setup}"
 AP_PASS="${LUMINA_AP_PASS:-luminasetup}"
 AP_CON="lumina-setup-ap"
-GRACE_SECONDS="${LUMINA_AP_GRACE:-45}"
+GRACE_SECONDS="${LUMINA_AP_GRACE:-90}"
 CHECK_INTERVAL="${LUMINA_AP_INTERVAL:-20}"
 
 command -v nmcli >/dev/null 2>&1 || exit 0
@@ -31,6 +31,22 @@ has_connection() {
   nmcli -t -f NAME,TYPE connection show --active 2>/dev/null |
     grep -v "^${AP_CON}:" |
     grep -qE ':(802-3-ethernet|802-11-wireless)$'
+}
+
+# True when an Ethernet cable is physically connected, whether or not it has
+# obtained an address yet. A wired site is never a candidate for the setup
+# hotspot: slow DHCP must not cause WiFi instructions to appear on a screen
+# that is plainly cabled.
+wired_link_present() {
+  local dev
+  while IFS= read -r dev; do
+    [ -n "$dev" ] || continue
+    if [ "$(cat "/sys/class/net/${dev}/carrier" 2>/dev/null)" = "1" ]; then
+      return 0
+    fi
+  done < <(nmcli -t -f DEVICE,TYPE device status 2>/dev/null |
+    awk -F: '$2 == "ethernet" { print $1 }')
+  return 1
 }
 
 ap_active() {
@@ -52,14 +68,18 @@ ensure_ap_profile() {
 sleep "$GRACE_SECONDS"
 
 while true; do
-  if has_connection; then
+  # The hotspot is a last resort: it exists only for a device that has no
+  # connection AND no cable. Plugging in Ethernet at any point takes it down.
+  if has_connection || wired_link_present; then
     if ap_active; then
       nmcli connection down "$AP_CON" >/dev/null 2>&1 || true
     fi
-  else
+  elif ! ap_active; then
     dev="$(wifi_device)"
-    if [ -n "$dev" ] && ! ap_active; then
-      if ensure_ap_profile "$dev"; then
+    if [ -n "$dev" ]; then
+      # Re-check after the profile work below can take a moment; conditions
+      # may have changed while we were waiting.
+      if ensure_ap_profile "$dev" && ! has_connection && ! wired_link_present; then
         nmcli connection up "$AP_CON" >/dev/null 2>&1 || true
       fi
     fi

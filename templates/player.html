@@ -392,6 +392,12 @@ async function renderSetupScreen() {
     foot.textContent = info.hostname
       ? `Device: ${info.hostname}  ·  also reachable at http://${info.hostname}.local`
       : '';
+  } else if (info && info.wired_link) {
+    // Cabled but no address yet — never advertise WiFi setup here.
+    title.textContent = 'Waiting for the network';
+    subtitle.textContent = 'A network cable is connected but this screen has not received an address yet.';
+    card.innerHTML = step('!', 'This usually clears on its own within a minute. If it persists, check that the cable’s network provides DHCP.');
+    foot.textContent = info.hostname ? `Device: ${info.hostname}` : '';
   } else {
     title.textContent = 'Starting up';
     subtitle.textContent = 'Waiting for the LuminaShow service and network to come up…';
