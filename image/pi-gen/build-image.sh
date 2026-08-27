@@ -37,8 +37,8 @@ cp -r "$CUSTOM_STAGE_SRC" "$CUSTOM_STAGE_DST"
 # Stage scripts must be executable and LF-terminated for pi-gen to run them.
 find "$CUSTOM_STAGE_DST" -name '*.sh' -exec sed -i 's/\r$//' {} \; -exec chmod +x {} \;
 
-# Only export the final lumina image, not the intermediate lite/desktop ones.
-touch "$PIGEN_DIR/stage2/SKIP_IMAGES" "$PIGEN_DIR/stage4/SKIP_IMAGES" 2>/dev/null || true
+# Only export the final lumina image, not the intermediate Lite one.
+touch "$PIGEN_DIR/stage2/SKIP_IMAGES" 2>/dev/null || true
 
 # Package current repo snapshot for the custom stage.
 mkdir -p "$CUSTOM_STAGE_DST/01-lumina/files"
@@ -49,8 +49,10 @@ tar -C "$LUMINA_SRC_DIR" \
   --exclude "venv" \
   -czf "$CUSTOM_STAGE_DST/01-lumina/files/lumina-signage.tar.gz" .
 
-# Stages 3+4 add the desktop and Chromium — required for kiosk playback on
-# the device itself. Lite (stage2 only) would boot to a black console.
+# Lite base (stage0-2). The signage appliance does not need a desktop: the
+# custom stage adds Chromium plus cage, a single-application Wayland
+# compositor, and a systemd unit owns the display. That keeps the image about
+# half the size of a desktop build and removes the desktop session entirely.
 cat > "$PIGEN_DIR/config" <<EOF
 IMG_NAME='$IMG_NAME'
 RELEASE='$RELEASE'
@@ -59,7 +61,7 @@ TARGET_HOSTNAME='$TARGET_HOSTNAME'
 ENABLE_SSH=$ENABLE_SSH
 FIRST_USER_NAME='$FIRST_USER_NAME'
 FIRST_USER_PASS='$FIRST_USER_PASS'
-STAGE_LIST="stage0 stage1 stage2 stage3 stage4 stage-lumina"
+STAGE_LIST="stage0 stage1 stage2 stage-lumina"
 EOF
 
 cat <<EOF

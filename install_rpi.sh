@@ -10,6 +10,8 @@ APP_PORT="${LUMINA_PORT:-8080}"
 KIOSK_USER=""
 NON_INTERACTIVE=false
 SKIP_APT=false
+NO_START=false
+SETUP_AP=true
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SECRET_KEY="${LUMINA_SECRET_KEY:-$(openssl rand -hex 32)}"
 
@@ -23,6 +25,8 @@ Options:
   --kiosk-user <username>    Install kiosk autostart desktop file for this user
   --non-interactive          Run without prompts (for automation / image build)
   --skip-apt                 Skip apt update/install (if already provisioned)
+  --no-start                 Enable services but do not start them (image build)
+  --no-setup-ap              Do not install the WiFi setup-hotspot fallback
   -h, --help                 Show this help
 EOF
 }
@@ -47,6 +51,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-apt)
       SKIP_APT=true
+      shift
+      ;;
+    --no-start)
+      NO_START=true
+      shift
+      ;;
+    --no-setup-ap)
+      SETUP_AP=false
       shift
       ;;
     -h|--help)
@@ -217,33 +229,54 @@ if [[ ! -f "$INSTALL_DIR/lumina.db" ]]; then
 fi
 
 if [[ -n "$KIOSK_USER" ]]; then
-  # Launcher script: wait for the app to come up before starting the browser,
-  # otherwise a boot race leaves a "connection refused" page on screen forever.
-  cat > /usr/local/bin/lumina-kiosk <<'EOF'
-#!/bin/sh
-until curl -sf -o /dev/null http://localhost/player; do
-  sleep 2
-done
+  install -m 0755 "$INSTALL_DIR/scripts/lumina-kiosk" /usr/local/bin/lumina-kiosk
+  sed -i 's/\r$//' /usr/local/bin/lumina-kiosk
 
-BROWSER="$(command -v chromium-browser || command -v chromium)"
-[ -n "$BROWSER" ] || exit 1
-# --autoplay-policy is required for signage: without it Chromium blocks
-# autoplay with sound, so video/YouTube items never start on their own.
-exec "$BROWSER" \
-  --kiosk \
-  --incognito \
-  --noerrdialogs \
-  --disable-session-crashed-bubble \
-  --no-first-run \
-  --autoplay-policy=no-user-gesture-required \
-  http://localhost/player
+  # Two supported shapes:
+  #   Appliance (Raspberry Pi OS Lite + cage) — a systemd unit owns the
+  #     display. Deterministic ordering, restartable, no desktop session.
+  #   Desktop (Raspberry Pi OS with desktop) — XDG autostart, because the
+  #     session manager already owns the display.
+  if command -v cage >/dev/null 2>&1 && ! systemctl is-enabled lightdm.service >/dev/null 2>&1; then
+    for grp in video render input tty; do
+      usermod -aG "$grp" "$KIOSK_USER" 2>/dev/null || true
+    done
+
+    cat > /etc/systemd/system/lumina-kiosk.service <<EOF
+[Unit]
+Description=LuminaShow Kiosk Display
+After=lumina.service nginx.service systemd-user-sessions.service
+Wants=lumina.service
+
+[Service]
+Type=simple
+User=$KIOSK_USER
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+ExecStart=/usr/bin/cage -- /usr/local/bin/lumina-kiosk
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
 EOF
-  chmod 0755 /usr/local/bin/lumina-kiosk
 
-  # No OnlyShowIn here: Raspberry Pi OS Bookworm sessions identify as
-  # LXDE-pi-wayfire / wayfire / labwc, so an OnlyShowIn=LXDE entry never runs.
-  mkdir -p /etc/xdg/autostart
-  cat > /etc/xdg/autostart/lumina-player.desktop <<EOF
+    # Console blanking would black out the screen after ~10 minutes.
+    for cmdline in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
+      [[ -f "$cmdline" ]] || continue
+      grep -q 'consoleblank=0' "$cmdline" || sed -i '1 s/$/ consoleblank=0/' "$cmdline"
+      break
+    done
+  else
+    # No OnlyShowIn here: Raspberry Pi OS Bookworm sessions identify as
+    # LXDE-pi-wayfire / wayfire / labwc, so an OnlyShowIn=LXDE entry never runs.
+    mkdir -p /etc/xdg/autostart
+    cat > /etc/xdg/autostart/lumina-player.desktop <<EOF
 [Desktop Entry]
 Type=Application
 Name=LuminaShow Player
@@ -251,29 +284,88 @@ Exec=/usr/local/bin/lumina-kiosk
 X-GNOME-Autostart-enabled=true
 EOF
 
-  # Keep the display awake — signage must not blank after 10 minutes.
-  if command -v raspi-config >/dev/null 2>&1; then
-    raspi-config nonint do_blanking 1 || true
-  fi
+    if command -v raspi-config >/dev/null 2>&1; then
+      raspi-config nonint do_blanking 1 || true
+    fi
 
-  # Ensure kiosk user can auto-login in Raspberry Pi OS Desktop.
-  if [[ -f /etc/lightdm/lightdm.conf ]]; then
-    if grep -q '^autologin-user=' /etc/lightdm/lightdm.conf; then
-      sed -i "s/^autologin-user=.*/autologin-user=$KIOSK_USER/" /etc/lightdm/lightdm.conf
-    else
-      printf "\n[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\n" "$KIOSK_USER" >> /etc/lightdm/lightdm.conf
+    if [[ -f /etc/lightdm/lightdm.conf ]]; then
+      if grep -q '^autologin-user=' /etc/lightdm/lightdm.conf; then
+        sed -i "s/^autologin-user=.*/autologin-user=$KIOSK_USER/" /etc/lightdm/lightdm.conf
+      else
+        printf "\n[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\n" "$KIOSK_USER" >> /etc/lightdm/lightdm.conf
+      fi
     fi
   fi
 fi
 
-systemctl daemon-reload
-systemctl enable lumina.service
-systemctl restart lumina.service
-systemctl enable nginx
-systemctl restart nginx
+# WiFi setup hotspot: lets a non-technical user move the device to a new
+# network without a keyboard — see scripts/lumina-netwatch.
+if [[ "$SETUP_AP" == true ]] && [[ -f "$INSTALL_DIR/scripts/lumina-netwatch" ]]; then
+  install -m 0755 "$INSTALL_DIR/scripts/lumina-netwatch" /usr/local/sbin/lumina-netwatch
+  sed -i 's/\r$//' /usr/local/sbin/lumina-netwatch
+  mkdir -p /etc/lumina
+  if [[ ! -f /etc/lumina/setup-ap.env ]]; then
+    cat > /etc/lumina/setup-ap.env <<EOF
+# Credentials for the fallback setup hotspot shown on the player screen.
+LUMINA_AP_SSID=LuminaShow-Setup
+LUMINA_AP_PASS=luminasetup
+EOF
+    chmod 0644 /etc/lumina/setup-ap.env
+  fi
 
-ip_addr="$(hostname -I | awk '{print $1}')"
-echo ""
-echo "LuminaShow installed for Raspberry Pi."
-echo "Open: http://${ip_addr:-localhost}"
-echo "Default login: admin / admin123"
+  cat > /etc/systemd/system/lumina-netwatch.service <<EOF
+[Unit]
+Description=LuminaShow WiFi setup hotspot fallback
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/lumina-netwatch
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+fi
+
+# Enable a unit, falling back to manual symlinks when systemd is not
+# reachable (image builds run inside a chroot).
+enable_unit() {
+  local unit="$1" target="${2:-multi-user.target}" path=""
+  systemctl enable "$unit" >/dev/null 2>&1 && return 0
+  for dir in /etc/systemd/system /lib/systemd/system /usr/lib/systemd/system; do
+    if [[ -f "$dir/$unit" ]]; then
+      path="$dir/$unit"
+      break
+    fi
+  done
+  [[ -n "$path" ]] || return 0
+  mkdir -p "/etc/systemd/system/${target}.wants"
+  ln -sf "$path" "/etc/systemd/system/${target}.wants/$unit"
+}
+
+UNITS=(lumina.service nginx.service)
+[[ -f /etc/systemd/system/lumina-kiosk.service ]] && UNITS+=(lumina-kiosk.service)
+[[ -f /etc/systemd/system/lumina-netwatch.service ]] && UNITS+=(lumina-netwatch.service)
+
+if [[ "$NO_START" == true ]]; then
+  for unit in "${UNITS[@]}"; do
+    enable_unit "$unit"
+  done
+  echo ""
+  echo "LuminaShow staged into the image (services enabled, not started)."
+else
+  systemctl daemon-reload
+  for unit in "${UNITS[@]}"; do
+    enable_unit "$unit"
+    systemctl restart "$unit" || true
+  done
+
+  ip_addr="$(hostname -I | awk '{print $1}')"
+  echo ""
+  echo "LuminaShow installed for Raspberry Pi."
+  echo "Open: http://${ip_addr:-localhost}"
+  echo "Default login: admin / admin123"
+fi

@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.6.0] — 2026-08-27
+
+### Changed
+
+- **Appliance image — Raspberry Pi OS Lite base** — The SD-card image no longer builds the full desktop. It now uses the Lite stages plus Chromium and `cage` (a single-application Wayland compositor), roughly halving the image and removing the desktop session, file manager, and panel that signage never used.
+- **Kiosk is a systemd service, not a desktop autostart entry** — `lumina-kiosk.service` runs the browser under `cage` with explicit ordering after `lumina.service`. This removes the first-boot race where the autostart entry was written *after* the desktop session had already read `/etc/xdg/autostart`, so the player never appeared until a manual reboot. On a full desktop install the installer still uses XDG autostart, detected automatically.
+- **The image installs at build time, not first boot** — the virtualenv and `pip install` now run inside the pi-gen chroot. A flashed device comes up playing content with **no internet connection required**. Previously a missing network made `pip` fail, which aborted the entire first-boot installer under `set -e` and silently left a stock desktop with no Lumina. First boot now only regenerates the session signing key so devices flashed from one image do not share it.
+- **Console blanking disabled** on appliance installs via `consoleblank=0`.
+
+### Added
+
+- **WiFi setup hotspot** (`lumina-netwatch`) — when the device has no network after boot, it broadcasts a WPA2 access point (`LuminaShow-Setup` / `luminasetup`). Connect a phone or laptop, open `http://10.42.0.1`, and use the Network page to join the real network; the hotspot shuts down automatically once connected. This closes the chicken-and-egg gap where the network admin UI was unreachable precisely when it was needed — moving a screen to a new site no longer needs a keyboard, monitor, or SSH.
+- **On-screen setup guide** — with no content, the player now shows large, room-readable numbered instructions instead of a near-black "No content scheduled" message: either how to join the setup hotspot, or the device's IP/hostname and the steps to add content. It refreshes every 15 seconds, so the screen updates itself as the device joins a network or receives its first playlist.
+- **`GET /api/device-info`** — unauthenticated endpoint (like `/api/current-playlist`) returning hostname, IPv4 addresses, and setup-hotspot state for the player's setup screen.
+
+---
+
 ## [1.5.0] — 2026-08-27
 
 ### Added

@@ -995,6 +995,65 @@ def split_terse(line):
     return parts
 
 
+SETUP_AP_CON = "lumina-setup-ap"
+SETUP_AP_CONF = "/etc/lumina/setup-ap.env"
+
+
+def local_ipv4_addresses():
+    addrs = []
+    if network_supported():
+        rc, out, _ = run_cmd(["nmcli", "-g", "IP4.ADDRESS", "device", "show"], timeout=10)
+        if rc == 0:
+            for line in out.splitlines():
+                ip = line.strip().split("/")[0]
+                if ip and not ip.startswith("127."):
+                    addrs.append(ip)
+    if not addrs:
+        try:
+            # Pick the address used for outbound routing. TEST-NET-1 target,
+            # UDP — nothing is actually sent.
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("192.0.2.1", 80))
+                addrs.append(s.getsockname()[0])
+        except OSError:
+            pass
+    return addrs
+
+
+def setup_ap_status():
+    """Details of the fallback hotspot, when it is currently broadcasting."""
+    if not network_supported():
+        return None
+    rc, out, _ = run_cmd(["nmcli", "-t", "-f", "NAME", "connection", "show", "--active"])
+    if rc != 0 or SETUP_AP_CON not in out.splitlines():
+        return None
+    ssid, password = "LuminaShow-Setup", None
+    try:
+        with open(SETUP_AP_CONF, encoding="utf-8") as fh:
+            for line in fh:
+                key, _, val = line.strip().partition("=")
+                if key == "LUMINA_AP_SSID" and val:
+                    ssid = val
+                elif key == "LUMINA_AP_PASS" and val:
+                    password = val
+    except OSError:
+        pass
+    # Safe to expose unauthenticated: these credentials are displayed on the
+    # screen itself, and reaching this endpoint already requires being on the
+    # hotspot or the LAN.
+    return {"ssid": ssid, "password": password, "url": "http://10.42.0.1"}
+
+
+@app.route("/api/device-info")
+def api_device_info():
+    """Unauthenticated: the kiosk player shows this on screen during setup."""
+    return jsonify({
+        "hostname": socket.gethostname(),
+        "addresses": local_ipv4_addresses(),
+        "setup_ap": setup_ap_status(),
+    })
+
+
 @app.route("/api/network/status")
 @login_required
 @role_required("admin")

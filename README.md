@@ -37,6 +37,7 @@
 - **Full-screen player** â€” smooth fade transitions, keyboard shortcuts, auto-advance
 - **Role-based access control** â€” Admin, Editor, and Viewer roles
 - **Network management** â€” change hostname, join WiFi, and set DHCP/static IP from the admin UI (Admin only, requires NetworkManager)
+- **Zero-keyboard setup** â€” the appliance image falls back to its own `LuminaShow-Setup` WiFi hotspot when it has no network, and the screen itself shows the steps to get connected
 - **Nginx reverse proxy** â€” production-ready setup out of the box
 - **Systemd service** â€” auto-starts on boot, auto-restarts on failure
 - **REST API** â€” full API for automation and custom integrations
@@ -587,6 +588,10 @@ MIT License â€” see `LICENSE` for details.
 
 ## Raspberry Pi 4/5
 
-Raspberry Pi install and image-build instructions are documented in `docs/RASPBERRY_PI.md`.
+LuminaShow ships as a signage **appliance image** built from Raspberry Pi OS Lite — no desktop, with the player running under `cage` and managed by `lumina-kiosk.service`.
+
+Flash it, plug in HDMI and power, and the screen displays its own setup instructions: either the address to open (`http://<ip>`), or — when it has no network — how to join its fallback `LuminaShow-Setup` hotspot to configure WiFi from a phone. Moving a screen to a new site needs no keyboard, monitor, or SSH.
+
+Full instructions, installer flags, and image-build steps: [`docs/RASPBERRY_PI.md`](docs/RASPBERRY_PI.md).
 
 

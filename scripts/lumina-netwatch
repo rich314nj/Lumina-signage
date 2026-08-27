@@ -1,0 +1,68 @@
+#!/bin/bash
+# Setup-hotspot fallback for LuminaShow.
+#
+# Solves the chicken-and-egg problem of moving a signage device to a new
+# site: the admin UI can join a WiFi network, but you cannot reach the admin
+# UI until the device is on a network. When no connection comes up, this
+# starts a WPA2 access point so a phone or laptop can connect directly to
+# the device and configure it. The hotspot is torn down as soon as a real
+# connection is established.
+set -u
+
+CONF_FILE="/etc/lumina/setup-ap.env"
+# shellcheck disable=SC1090  # optional operator-editable config
+[ -r "$CONF_FILE" ] && . "$CONF_FILE"
+
+AP_SSID="${LUMINA_AP_SSID:-LuminaShow-Setup}"
+AP_PASS="${LUMINA_AP_PASS:-luminasetup}"
+AP_CON="lumina-setup-ap"
+GRACE_SECONDS="${LUMINA_AP_GRACE:-45}"
+CHECK_INTERVAL="${LUMINA_AP_INTERVAL:-20}"
+
+command -v nmcli >/dev/null 2>&1 || exit 0
+
+wifi_device() {
+  nmcli -t -f DEVICE,TYPE device status 2>/dev/null |
+    awk -F: '$2 == "wifi" { print $1; exit }'
+}
+
+# True when a real (non-hotspot) connection is active.
+has_connection() {
+  nmcli -t -f NAME,TYPE connection show --active 2>/dev/null |
+    grep -v "^${AP_CON}:" |
+    grep -qE ':(802-3-ethernet|802-11-wireless)$'
+}
+
+ap_active() {
+  nmcli -t -f NAME connection show --active 2>/dev/null | grep -qx "$AP_CON"
+}
+
+ensure_ap_profile() {
+  local dev="$1"
+  nmcli -t -f NAME connection show 2>/dev/null | grep -qx "$AP_CON" && return 0
+  # ipv4.method shared makes NetworkManager run DHCP/DNS on 10.42.0.1.
+  nmcli connection add type wifi ifname "$dev" con-name "$AP_CON" \
+    autoconnect no ssid "$AP_SSID" \
+    802-11-wireless.mode ap 802-11-wireless.band bg \
+    ipv4.method shared \
+    wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$AP_PASS" >/dev/null 2>&1
+}
+
+# Give DHCP and saved WiFi networks a chance before advertising a hotspot.
+sleep "$GRACE_SECONDS"
+
+while true; do
+  if has_connection; then
+    if ap_active; then
+      nmcli connection down "$AP_CON" >/dev/null 2>&1 || true
+    fi
+  else
+    dev="$(wifi_device)"
+    if [ -n "$dev" ] && ! ap_active; then
+      if ensure_ap_profile "$dev"; then
+        nmcli connection up "$AP_CON" >/dev/null 2>&1 || true
+      fi
+    fi
+  fi
+  sleep "$CHECK_INTERVAL"
+done

@@ -15,3 +15,10 @@ libssl-dev
 libjpeg-dev
 libpng-dev
 libwebp-dev
+network-manager
+dnsmasq-base
+iptables
+cage
+chromium-browser
+fonts-dejavu-core
+libgl1-mesa-dri

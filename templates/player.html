@@ -42,11 +42,47 @@ html, body {
   z-index: 100; pointer-events: none;
 }
 #player:hover #pdfPageBadge { opacity: 1; }
+/* Setup screen. Sized to be readable across a room, since this is what a
+   new device shows on the TV before it has content. */
 #emptyState {
-  color: #333; text-align: center;
+  color: #e8ecf0; text-align: center;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 4vh 4vw; max-width: 1100px;
 }
-#emptyState h2 { font-size: 24px; margin-bottom: 8px; }
-#emptyState p { font-size: 14px; }
+#emptyState h2 { font-size: clamp(28px, 4.5vw, 56px); margin-bottom: 12px; font-weight: 700; }
+#emptyState p { font-size: clamp(15px, 1.8vw, 24px); color: #8899aa; }
+.setup-card {
+  margin-top: clamp(20px, 4vh, 48px);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+  padding: clamp(20px, 3.5vh, 40px) clamp(24px, 4vw, 56px);
+}
+.setup-step {
+  display: flex; align-items: center; gap: clamp(12px, 1.6vw, 22px);
+  text-align: left; margin-bottom: clamp(14px, 2vh, 22px);
+}
+.setup-step:last-child { margin-bottom: 0; }
+.setup-num {
+  flex-shrink: 0;
+  width: clamp(30px, 3.2vw, 44px); height: clamp(30px, 3.2vw, 44px);
+  border-radius: 50%; background: #e8721c; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: clamp(15px, 1.7vw, 22px); font-weight: 700;
+}
+.setup-text { font-size: clamp(15px, 1.9vw, 26px); color: #c8d0d8; line-height: 1.35; }
+.setup-value {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #f59542; font-weight: 700;
+  background: rgba(232,114,28,0.12);
+  padding: 0.08em 0.4em; border-radius: 6px;
+  white-space: nowrap;
+}
+.setup-foot {
+  margin-top: clamp(16px, 2.5vh, 28px);
+  font-size: clamp(12px, 1.3vw, 17px); color: #55626f;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
 
 /* HUD */
 #hud {
@@ -107,9 +143,11 @@ html, body {
     <canvas id="pdfCanvas"></canvas>
     <div id="pdfPageBadge">Page 1 / 1</div>
     <div id="emptyState">
-      <div style="font-size:60px;margin-bottom:16px;opacity:0.2">◈</div>
-      <h2 style="color:#444">No content scheduled</h2>
-      <p style="color:#333">Add assets and create a playlist to get started</p>
+      <div style="font-size:clamp(40px,6vw,80px);margin-bottom:8px;color:#e8721c;opacity:0.85">◈</div>
+      <h2 id="setupTitle">Ready to set up</h2>
+      <p id="setupSubtitle">This screen has no content yet.</p>
+      <div class="setup-card" id="setupCard"></div>
+      <div class="setup-foot" id="setupFoot"></div>
     </div>
   </div>
   <div id="progressBar"></div>
@@ -303,9 +341,80 @@ async function loadPlaylist() {
   }
 }
 
+// ── Setup screen ───────────────────────────────────────────────────────────────
+// With no content, the screen itself tells the operator what to do next —
+// either how to join the device to WiFi (via the fallback hotspot) or which
+// address to open to add content.
+let setupPoll = null;
+
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function step(n, html) {
+  return `<div class="setup-step"><div class="setup-num">${n}</div><div class="setup-text">${html}</div></div>`;
+}
+
+async function renderSetupScreen() {
+  const title = document.getElementById('setupTitle');
+  const subtitle = document.getElementById('setupSubtitle');
+  const card = document.getElementById('setupCard');
+  const foot = document.getElementById('setupFoot');
+  let info = null;
+  try {
+    info = await (await fetch('/api/device-info')).json();
+  } catch (e) { /* server not reachable yet — fall through to generic help */ }
+
+  if (info && info.setup_ap) {
+    const ap = info.setup_ap;
+    title.textContent = 'Connect this screen to WiFi';
+    subtitle.textContent = 'This device is not on a network yet. Use a phone or laptop to set it up.';
+    card.innerHTML =
+      step(1, `Join the WiFi network <span class="setup-value">${escHtml(ap.ssid)}</span>` +
+              (ap.password ? ` using password <span class="setup-value">${escHtml(ap.password)}</span>` : '')) +
+      step(2, `Open <span class="setup-value">${escHtml(ap.url)}</span> in a web browser`) +
+      step(3, `Sign in, open <b>Network</b>, and choose your WiFi network`);
+    foot.textContent = 'The screen updates automatically once the device joins your network.';
+    return;
+  }
+
+  const addresses = (info && info.addresses) || [];
+  if (addresses.length) {
+    title.textContent = 'Ready for content';
+    subtitle.textContent = 'This screen is connected and waiting for a playlist.';
+    card.innerHTML =
+      step(1, `On any device on the same network, open ` +
+              addresses.map(a => `<span class="setup-value">http://${escHtml(a)}</span>`).join(' or ')) +
+      step(2, `Sign in and upload images, video, or PDFs under <b>Assets</b>`) +
+      step(3, `Create a playlist, mark it <b>Active</b>, and it starts playing here`);
+    foot.textContent = info.hostname
+      ? `Device: ${info.hostname}  ·  also reachable at http://${info.hostname}.local`
+      : '';
+  } else {
+    title.textContent = 'Starting up';
+    subtitle.textContent = 'Waiting for the LuminaShow service and network to come up…';
+    card.innerHTML = step('!', 'If this message stays for more than a few minutes, connect an Ethernet cable or check power.');
+    foot.textContent = '';
+  }
+}
+
 function showEmpty() {
   hideAll();
   emptyEl.style.display = 'block';
+  renderSetupScreen();
+  // Poll faster than the normal schedule check so the screen picks up its
+  // first playlist (or a new IP) promptly during setup.
+  if (!setupPoll) {
+    setupPoll = setInterval(async () => {
+      if (emptyEl.style.display === 'none') {
+        clearInterval(setupPoll); setupPoll = null; return;
+      }
+      renderSetupScreen();
+      loadPlaylist();
+    }, 15000);
+  }
 }
 
 function hideAll() {

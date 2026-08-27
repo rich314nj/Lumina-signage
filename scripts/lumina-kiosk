@@ -1,0 +1,51 @@
+#!/bin/bash
+# Launches the LuminaShow player full-screen.
+#
+# In appliance mode this runs inside cage (a Wayland kiosk compositor) from
+# lumina-kiosk.service. On a full desktop it is launched by the XDG autostart
+# entry instead. Both paths share this script so the browser flags stay in
+# one place.
+set -u
+
+PLAYER_URL="${LUMINA_PLAYER_URL:-http://localhost/player}"
+
+# Wait for the server before starting the browser: without this a boot race
+# leaves a "connection refused" page on the screen indefinitely.
+for _ in $(seq 1 150); do
+  if curl -sf -o /dev/null --max-time 3 "$PLAYER_URL"; then
+    break
+  fi
+  sleep 2
+done
+
+BROWSER="$(command -v chromium-browser || command -v chromium || true)"
+if [ -z "$BROWSER" ]; then
+  echo "lumina-kiosk: no chromium binary found" >&2
+  exit 1
+fi
+
+PROFILE_DIR="${HOME:-/tmp}/.config/lumina-kiosk"
+mkdir -p "$PROFILE_DIR"
+
+# Only force the Wayland backend when actually running under a Wayland
+# compositor — passing it on an X11 desktop stops Chromium from starting.
+PLATFORM_ARGS=()
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+  PLATFORM_ARGS+=(--ozone-platform=wayland)
+fi
+
+# --autoplay-policy is required for signage: without it Chromium blocks
+# autoplay with sound, so video and YouTube items never start on their own.
+exec "$BROWSER" \
+  --kiosk \
+  --noerrdialogs \
+  --disable-infobars \
+  --disable-session-crashed-bubble \
+  --disable-features=Translate \
+  --disable-pinch \
+  --no-first-run \
+  --check-for-update-interval=31536000 \
+  --autoplay-policy=no-user-gesture-required \
+  --user-data-dir="$PROFILE_DIR" \
+  "${PLATFORM_ARGS[@]}" \
+  "$PLAYER_URL"

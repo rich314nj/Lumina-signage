@@ -37,17 +37,22 @@ jobs:
 
       - name: Ensure shell scripts are executable
         run: |
-          chmod +x install_rpi.sh
+          chmod +x install_rpi.sh install.sh uninstall.sh
+          chmod +x scripts/lumina-net scripts/lumina-kiosk scripts/lumina-netwatch
           chmod +x image/pi-gen/build-image.sh
           chmod +x image/pi-gen/stage-lumina/prerun.sh
           chmod +x image/pi-gen/stage-lumina/01-lumina/00-run.sh
+          chmod +x image/pi-gen/stage-lumina/01-lumina/00-run-chroot.sh
 
       - name: Normalize line endings for shell validation
         run: |
-          sed -i 's/\r$//' install_rpi.sh
-          sed -i 's/\r$//' image/pi-gen/build-image.sh
-          sed -i 's/\r$//' image/pi-gen/stage-lumina/prerun.sh
-          sed -i 's/\r$//' image/pi-gen/stage-lumina/01-lumina/00-run.sh
+          for f in install_rpi.sh scripts/lumina-net scripts/lumina-kiosk \
+                   scripts/lumina-netwatch image/pi-gen/build-image.sh \
+                   image/pi-gen/stage-lumina/prerun.sh \
+                   image/pi-gen/stage-lumina/01-lumina/00-run.sh \
+                   image/pi-gen/stage-lumina/01-lumina/00-run-chroot.sh; do
+            sed -i 's/\r$//' "$f"
+          done
 
       - name: Install shellcheck
         run: |
@@ -56,17 +61,24 @@ jobs:
 
       - name: Bash syntax checks
         run: |
-          bash -n install_rpi.sh
-          bash -n image/pi-gen/build-image.sh
-          bash -n image/pi-gen/stage-lumina/prerun.sh
-          bash -n image/pi-gen/stage-lumina/01-lumina/00-run.sh
+          for f in install_rpi.sh scripts/lumina-net scripts/lumina-kiosk \
+                   scripts/lumina-netwatch image/pi-gen/build-image.sh \
+                   image/pi-gen/stage-lumina/prerun.sh \
+                   image/pi-gen/stage-lumina/01-lumina/00-run.sh \
+                   image/pi-gen/stage-lumina/01-lumina/00-run-chroot.sh; do
+            bash -n "$f"
+          done
 
       - name: Shellcheck
         run: |
           shellcheck install_rpi.sh
+          shellcheck scripts/lumina-net
+          shellcheck scripts/lumina-kiosk
+          shellcheck scripts/lumina-netwatch
           shellcheck image/pi-gen/build-image.sh
           shellcheck -e SC2154 image/pi-gen/stage-lumina/prerun.sh
           shellcheck image/pi-gen/stage-lumina/01-lumina/00-run.sh
+          shellcheck image/pi-gen/stage-lumina/01-lumina/00-run-chroot.sh
 
   build-image:
     name: Build Raspberry Pi Image
