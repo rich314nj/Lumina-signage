@@ -90,8 +90,14 @@ cmd_apply() {
   stamp="$(date -u +%Y%m%d-%H%M%S)"
   backup="$BACKUP_DIR/$stamp"
   mkdir -p "$backup"
-  [[ -f "$INSTALL_DIR/lumina.db" ]] && cp -a "$INSTALL_DIR/lumina.db" "$backup/" || true
-  [[ -f "$INSTALL_DIR/.env" ]] && cp -a "$INSTALL_DIR/.env" "$backup/" || true
+  # A failed backup must stop the update: without it a later rollback cannot
+  # restore anything. Previously this was `... || true`, which swallowed it.
+  if [[ -f "$INSTALL_DIR/lumina.db" ]]; then
+    cp -a "$INSTALL_DIR/lumina.db" "$backup/" || fail "Could not back up the database."
+  fi
+  if [[ -f "$INSTALL_DIR/.env" ]]; then
+    cp -a "$INSTALL_DIR/.env" "$backup/" || fail "Could not back up the configuration."
+  fi
   rsync -a --exclude 'venv' --exclude 'static/uploads' --exclude 'lumina.db' \
     "$INSTALL_DIR/" "$backup/code/" || fail "Could not back up the current install."
 
@@ -192,8 +198,13 @@ rollback() {
   fi
   # The previous version's helpers must come back with its code.
   install_helpers
-  [[ -f "$backup/lumina.db" ]] && cp -a "$backup/lumina.db" "$INSTALL_DIR/" || true
-  [[ -f "$backup/.env" ]] && cp -a "$backup/.env" "$INSTALL_DIR/" || true
+  # Best effort: we are already handling a failure, so keep going regardless.
+  if [[ -f "$backup/lumina.db" ]]; then
+    cp -a "$backup/lumina.db" "$INSTALL_DIR/" || true
+  fi
+  if [[ -f "$backup/.env" ]]; then
+    cp -a "$backup/.env" "$INSTALL_DIR/" || true
+  fi
   chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR" || true
   "$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt" >/dev/null 2>&1 || true
   systemctl start lumina.service >/dev/null 2>&1 || true
