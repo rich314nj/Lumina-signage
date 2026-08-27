@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  LuminaShow Digital Signage — Installer for Ubuntu 20.04 / 22.04 / 24.04
+#  LuminaShow Digital Signage â€” Installer for Ubuntu 20.04 / 22.04 / 24.04
 # =============================================================================
 set -euo pipefail
 
-# ── Colors ────────────────────────────────────────────────────────────────────
+# â”€â”€ Colors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 
-ok()    { echo -e "${GREEN}  ✓${RESET} $*"; }
-info()  { echo -e "${CYAN}  ▷${RESET} $*"; }
-warn()  { echo -e "${YELLOW}  ⚠${RESET} $*"; }
-error() { echo -e "${RED}  ✕${RESET} $*"; exit 1; }
-header(){ echo -e "\n${BOLD}${CYAN}── $* ──${RESET}"; }
+ok()    { echo -e "${GREEN}  âœ“${RESET} $*"; }
+info()  { echo -e "${CYAN}  â–·${RESET} $*"; }
+warn()  { echo -e "${YELLOW}  âš ${RESET} $*"; }
+error() { echo -e "${RED}  âœ•${RESET} $*"; exit 1; }
+header(){ echo -e "\n${BOLD}${CYAN}â”€â”€ $* â”€â”€${RESET}"; }
 
 # Wait for apt lock (common on Ubuntu Desktop due to unattended-upgrades)
 wait_for_apt() {
@@ -20,7 +20,7 @@ wait_for_apt() {
   while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock \
         >/dev/null 2>&1; do
     if [ $waited -eq 0 ]; then
-      info "Waiting for apt lock (unattended-upgrades may be running)…"
+      info "Waiting for apt lock (unattended-upgrades may be running)â€¦"
     fi
     sleep 3
     waited=$((waited + 3))
@@ -30,25 +30,25 @@ wait_for_apt() {
   done
 }
 
-# ── Banner ────────────────────────────────────────────────────────────────────
+# â”€â”€ Banner â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 cat << 'EOF'
 
-  ╔══════════════════════════════════════════════════════╗
-  ║                                                      ║
-  ║   ██╗     ██╗   ██╗███╗   ███╗██╗███╗   ██╗ █████╗  ║
-  ║   ██║     ██║   ██║████╗ ████║██║████╗  ██║██╔══██╗ ║
-  ║   ██║     ██║   ██║██╔████╔██║██║██╔██╗ ██║███████║ ║
-  ║   ██║     ██║   ██║██║╚██╔╝██║██║██║╚██╗██║██╔══██║ ║
-  ║   ███████╗╚██████╔╝██║ ╚═╝ ██║██║██║ ╚████║██║  ██║ ║
-  ║   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝ ║
-  ║                                                      ║
-  ║          C A S T   ·   Digital Signage               ║
-  ║             Ubuntu Installer  v1.2                   ║
-  ╚══════════════════════════════════════════════════════╝
+  â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+  â•‘                                                      â•‘
+  â•‘   â–ˆâ–ˆâ•—     â–ˆâ–ˆâ•—   â–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•—â–ˆâ–ˆâ–ˆâ•—   â–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—  â•‘
+  â•‘   â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ•— â–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ•—  â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•— â•‘
+  â•‘   â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â–ˆâ–ˆâ–ˆâ–ˆâ•”â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â–ˆâ–ˆâ•— â–ˆâ–ˆâ•‘â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•‘ â•‘
+  â•‘   â–ˆâ–ˆâ•‘     â–ˆâ–ˆâ•‘   â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â•šâ–ˆâ–ˆâ•—â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•”â•â•â–ˆâ–ˆâ•‘ â•‘
+  â•‘   â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•—â•šâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ•”â•â–ˆâ–ˆâ•‘ â•šâ•â• â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘ â•šâ–ˆâ–ˆâ–ˆâ–ˆâ•‘â–ˆâ–ˆâ•‘  â–ˆâ–ˆâ•‘ â•‘
+  â•‘   â•šâ•â•â•â•â•â•â• â•šâ•â•â•â•â•â• â•šâ•â•     â•šâ•â•â•šâ•â•â•šâ•â•  â•šâ•â•â•â•â•šâ•â•  â•šâ•â• â•‘
+  â•‘                                                      â•‘
+  â•‘          C A S T   Â·   Digital Signage               â•‘
+  â•‘             Ubuntu Installer  v1.2                   â•‘
+  â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 EOF
 
-# ── Checks ────────────────────────────────────────────────────────────────────
+# â”€â”€ Checks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Pre-flight checks"
 
 if [[ $EUID -ne 0 ]]; then
@@ -57,13 +57,13 @@ fi
 
 # Detect Ubuntu
 if ! grep -qi ubuntu /etc/os-release 2>/dev/null; then
-  warn "This script targets Ubuntu. Proceeding anyway…"
+  warn "This script targets Ubuntu. Proceeding anywayâ€¦"
 fi
 
 UBUNTU_VER=$(lsb_release -rs 2>/dev/null || echo "unknown")
 ok "Detected Ubuntu $UBUNTU_VER"
 
-# ── Variables ─────────────────────────────────────────────────────────────────
+# â”€â”€ Variables â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 INSTALL_DIR="/opt/lumina-signage"
 APP_USER="lumina"
 APP_PORT="${LUMINA_PORT:-8080}"
@@ -85,26 +85,26 @@ if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
   exit 0
 fi
 
-# ── Upgrade detection ─────────────────────────────────────────────────────────
+# â”€â”€ Upgrade detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 UPGRADE=false
 if [ -f "$INSTALL_DIR/app.py" ]; then
   warn "Existing LuminaShow installation detected at $INSTALL_DIR"
   echo ""
   echo -e "  ${BOLD}Options:${RESET}"
-  echo -e "    [U] Upgrade  — patch application files, keep database and uploads"
-  echo -e "    [R] Reinstall — full clean install (database and uploads will be wiped)"
+  echo -e "    [U] Upgrade  â€” patch application files, keep database and uploads"
+  echo -e "    [R] Reinstall â€” full clean install (database and uploads will be wiped)"
   echo -e "    [C] Cancel"
   echo ""
   read -rp "  Choice [U/r/c]: " INSTALL_MODE
   INSTALL_MODE="${INSTALL_MODE:-U}"
   case "${INSTALL_MODE^^}" in
-    U) UPGRADE=true; info "Upgrade mode — preserving database and uploads" ;;
-    R) warn "Reinstall mode — all existing data will be replaced" ;;
+    U) UPGRADE=true; info "Upgrade mode â€” preserving database and uploads" ;;
+    R) warn "Reinstall mode â€” all existing data will be replaced" ;;
     *) echo "Installation cancelled."; exit 0 ;;
   esac
 fi
 
-# ── System packages ───────────────────────────────────────────────────────────
+# â”€â”€ System packages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Updating system packages"
 wait_for_apt
 apt-get update -qq
@@ -141,22 +141,22 @@ if command -v ffmpeg &>/dev/null; then
   FFMPEG_VER=$(ffmpeg -version 2>&1 | head -1 | awk '{print $3}')
   ok "FFmpeg $FFMPEG_VER installed"
 else
-  warn "FFmpeg not found — video thumbnail generation will be disabled"
+  warn "FFmpeg not found â€” video thumbnail generation will be disabled"
 fi
 
 # Verify ImageMagick and fix PDF policy (Ubuntu ships with PDF disabled by default)
 IM_BIN=""
 if command -v magick &>/dev/null; then
   IM_BIN="magick"
-  ok "ImageMagick 7 (magick) installed — PDF thumbnails enabled"
+  ok "ImageMagick 7 (magick) installed â€” PDF thumbnails enabled"
 elif command -v convert &>/dev/null; then
   IM_BIN="convert"
-  ok "ImageMagick 6 (convert) installed — PDF thumbnails enabled"
+  ok "ImageMagick 6 (convert) installed â€” PDF thumbnails enabled"
 else
-  warn "ImageMagick not found — PDF thumbnails will be disabled (install with: sudo apt install imagemagick)"
+  warn "ImageMagick not found â€” PDF thumbnails will be disabled (install with: sudo apt install imagemagick)"
 fi
 
-# Ubuntu's ImageMagick policy.xml disables PDF by default — fix it
+# Ubuntu's ImageMagick policy.xml disables PDF by default â€” fix it
 for policy_file in /etc/ImageMagick-*/policy.xml; do
   if [ -f "$policy_file" ]; then
     # Change policy for PDF from "none" to "read|write"
@@ -167,7 +167,7 @@ for policy_file in /etc/ImageMagick-*/policy.xml; do
   fi
 done
 
-# ── Create user ───────────────────────────────────────────────────────────────
+# â”€â”€ Create user â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Creating application user"
 
 if ! id "$APP_USER" &>/dev/null; then
@@ -177,7 +177,7 @@ else
   ok "User $APP_USER already exists"
 fi
 
-# ── Install application ───────────────────────────────────────────────────────
+# â”€â”€ Install application â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Installing LuminaShow application"
 
 # Create directories
@@ -190,7 +190,7 @@ ok "Created directories"
 if [ -d "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/app.py" ]; then
   if [ "$UPGRADE" = true ]; then
     # Upgrade: copy everything EXCEPT the database and uploads
-    info "Patching application files (preserving database and uploads)…"
+    info "Patching application files (preserving database and uploads)â€¦"
     # Stop service before patching
     systemctl stop lumina.service 2>/dev/null || true
     rsync -a --exclude='lumina.db' \
@@ -208,17 +208,17 @@ else
 fi
 
 # Create Python virtual environment
-info "Creating Python virtual environment…"
+info "Creating Python virtual environmentâ€¦"
 python3 -m venv "$INSTALL_DIR/venv"
 ok "Virtual environment created"
 
 # Install Python dependencies
-info "Installing Python packages…"
+info "Installing Python packagesâ€¦"
 "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
 "$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
 ok "Python packages installed"
 
-# ── Configure ─────────────────────────────────────────────────────────────────
+# â”€â”€ Configure â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Configuring application"
 
 # Write environment file
@@ -237,7 +237,7 @@ sed -i "s|Environment=PORT=8080|Environment=PORT=${APP_PORT}|g" /etc/systemd/sys
 sed -i "s|--bind 0.0.0.0:8080|--bind 0.0.0.0:${APP_PORT}|g" /etc/systemd/system/lumina.service
 ok "Systemd service configured"
 
-# ── Nginx ─────────────────────────────────────────────────────────────────────
+# â”€â”€ Nginx â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Configuring Nginx reverse proxy"
 
 # Check for port 80 conflicts (Apache2 common on Ubuntu Desktop)
@@ -250,7 +250,7 @@ if systemctl is-active --quiet apache2 2>/dev/null; then
     systemctl disable apache2
     ok "Apache2 stopped and disabled"
   else
-    warn "Leaving Apache2 running — Nginx may fail to bind port 80. You can change the port later."
+    warn "Leaving Apache2 running â€” Nginx may fail to bind port 80. You can change the port later."
   fi
 fi
 
@@ -292,7 +292,7 @@ if [ -L /etc/nginx/sites-enabled/default ]; then
     rm -f /etc/nginx/sites-enabled/default
     ok "Removed nginx default site"
   else
-    warn "Skipped removing nginx default site — it points to a custom config ($DEFAULT_TARGET)"
+    warn "Skipped removing nginx default site â€” it points to a custom config ($DEFAULT_TARGET)"
   fi
 fi
 
@@ -300,10 +300,10 @@ fi
 if nginx -t -q 2>/dev/null; then
   ok "Nginx configuration valid"
 else
-  warn "Nginx configuration test failed — check /etc/nginx/sites-available/lumina"
+  warn "Nginx configuration test failed â€” check /etc/nginx/sites-available/lumina"
 fi
 
-# ── Permissions ───────────────────────────────────────────────────────────────
+# â”€â”€ Permissions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Setting permissions"
 
 chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
@@ -311,11 +311,11 @@ chown -R "$APP_USER:$APP_USER" "$LOG_DIR"
 chmod +x "$INSTALL_DIR/app.py"
 ok "Permissions set"
 
-# ── Initialize database ───────────────────────────────────────────────────────
+# â”€â”€ Initialize database â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Initializing database"
 
 if [ "$UPGRADE" = true ] && [ -f "$INSTALL_DIR/lumina.db" ]; then
-  ok "Existing database preserved — skipping initialization"
+  ok "Existing database preserved â€” skipping initialization"
 else
   cd "$INSTALL_DIR"
   sudo -u "$APP_USER" "$INSTALL_DIR/venv/bin/python" -c "
@@ -327,7 +327,7 @@ print('Database initialized')
   ok "Database created with default admin user"
 fi
 
-# ── Start services ─────────────────────────────────────────────────────────────
+# â”€â”€ Start services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Starting services"
 
 systemctl daemon-reload
@@ -350,7 +350,7 @@ else
   warn "Nginx failed to start. Check: journalctl -u nginx"
 fi
 
-# ── Firewall ──────────────────────────────────────────────────────────────────
+# â”€â”€ Firewall â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 header "Configuring firewall"
 
 if command -v ufw &>/dev/null; then
@@ -358,55 +358,55 @@ if command -v ufw &>/dev/null; then
   ufw allow 443/tcp > /dev/null 2>&1 || true
   ok "UFW rules added (port 80, 443)"
 else
-  info "UFW not found — configure your firewall manually to allow port 80"
+  info "UFW not found â€” configure your firewall manually to allow port 80"
 fi
 
-# ── Get server IP ──────────────────────────────────────────────────────────────
+# â”€â”€ Get server IP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SERVER_IP=$(hostname -I | awk '{print $1}')
 
-# ── Done ───────────────────────────────────────────────────────────────────────
+# â”€â”€ Done â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if [ "$UPGRADE" = true ]; then
 cat << DONE
 
-  ${GREEN}${BOLD}╔══════════════════════════════════════════════════════╗
-  ║       Upgrade to v1.2 Complete! 🎉                   ║
-  ╚══════════════════════════════════════════════════════╝${RESET}
+  ${GREEN}${BOLD}â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+  â•‘       Upgrade to v1.2 Complete! ðŸŽ‰                   â•‘
+  â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•${RESET}
 
   ${BOLD}What's new in v1.2:${RESET}
-    • PDF support — upload and display PDFs page-by-page
-    • Dark / Light mode toggle — persists across sessions
-    • ImageMagick PDF thumbnail generation
+    â€¢ PDF support â€” upload and display PDFs page-by-page
+    â€¢ Dark / Light mode toggle â€” persists across sessions
+    â€¢ ImageMagick PDF thumbnail generation
 
   ${BOLD}Access LuminaShow:${RESET}
-  ┌──────────────────────────────────────────────────┐
-  │  URL      →  http://${SERVER_IP}
-  └──────────────────────────────────────────────────┘
+  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+  â”‚  URL      â†’  http://${SERVER_IP}
+  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
   ${BOLD}Useful commands:${RESET}
     Status   : sudo systemctl status lumina
     Logs     : sudo journalctl -u lumina -f
     Restart  : sudo systemctl restart lumina
 
-  ${BOLD}Ubuntu Desktop — open player in kiosk mode:${RESET}
-    chromium-browser --kiosk http://localhost/player
-    google-chrome    --kiosk http://localhost/player
+  ${BOLD}Ubuntu Desktop â€” open player in kiosk mode:${RESET}
+    chromium-browser --kiosk --autoplay-policy=no-user-gesture-required http://localhost/player
+    google-chrome    --kiosk --autoplay-policy=no-user-gesture-required http://localhost/player
 
 DONE
 else
 cat << DONE
 
-  ${GREEN}${BOLD}╔══════════════════════════════════════════════════════╗
-  ║          Installation Complete! 🎉                   ║
-  ╚══════════════════════════════════════════════════════╝${RESET}
+  ${GREEN}${BOLD}â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
+  â•‘          Installation Complete! ðŸŽ‰                   â•‘
+  â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•${RESET}
 
   ${BOLD}Access LuminaShow:${RESET}
-  ┌──────────────────────────────────────────────────┐
-  │  URL      →  http://${SERVER_IP}
-  │  Username →  admin
-  │  Password →  admin123
-  └──────────────────────────────────────────────────┘
+  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+  â”‚  URL      â†’  http://${SERVER_IP}
+  â”‚  Username â†’  admin
+  â”‚  Password â†’  admin123
+  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
-  ${YELLOW}⚠  Change the default password immediately after login!${RESET}
+  ${YELLOW}âš   Change the default password immediately after login!${RESET}
 
   ${BOLD}Useful commands:${RESET}
     Status   : sudo systemctl status lumina
@@ -420,9 +420,9 @@ cat << DONE
     Logs     : ${LOG_DIR}/
     Config   : ${INSTALL_DIR}/.env
 
-  ${BOLD}Ubuntu Desktop — open player in kiosk mode:${RESET}
-    chromium-browser --kiosk http://localhost/player
-    google-chrome    --kiosk http://localhost/player
+  ${BOLD}Ubuntu Desktop â€” open player in kiosk mode:${RESET}
+    chromium-browser --kiosk --autoplay-policy=no-user-gesture-required http://localhost/player
+    google-chrome    --kiosk --autoplay-policy=no-user-gesture-required http://localhost/player
 
 DONE
 fi

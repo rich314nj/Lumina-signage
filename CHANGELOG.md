@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **[High] Kiosk autostart never ran on Raspberry Pi OS Bookworm** (#3) — The autostart desktop entry declared `OnlyShowIn=LXDE;`, but Bookworm sessions identify as `LXDE-pi-wayfire` / `wayfire` / `labwc`, so the player never launched on boot. The restriction has been removed.
+- **[High] Videos did not autoplay in kiosk mode** (#3) — Chromium blocks autoplay with sound without a user gesture, so video and YouTube items never started on their own. Kiosk launch now passes `--autoplay-policy=no-user-gesture-required`; installer banners and README examples updated to match.
+- **[Medium] Kiosk browser could race the server on boot** (#3) — Chromium could start before nginx/gunicorn were ready, leaving a permanent "connection refused" page. The new `/usr/local/bin/lumina-kiosk` launcher waits for `http://localhost/player` to respond before starting the browser.
+- **[Medium] Display blanked after 10 minutes on kiosk installs** (#3) — `install_rpi.sh --kiosk-user` now disables screen blanking via `raspi-config nonint do_blanking 1`.
 - **[High] YouTube embed errors froze the player** (#6) — When YouTube refused playback (embedding disabled, deleted video, ended live stream — reported as `api.invalidparam`), the player sat on YouTube's error screen for the item's full duration. The embed now loads with `enablejsapi=1` and an `origin` parameter, and the player listens for the embed's `onError` events via the widget postMessage protocol: broken videos display a brief reason (e.g., "embedding disabled — skipping") and advance to the next item after 1.5 seconds. Also added `playsinline=1` for reliable inline playback on kiosk browsers.
 
 ---

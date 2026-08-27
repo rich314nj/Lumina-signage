@@ -205,15 +205,44 @@ if [[ ! -f "$INSTALL_DIR/lumina.db" ]]; then
 fi
 
 if [[ -n "$KIOSK_USER" ]]; then
+  # Launcher script: wait for the app to come up before starting the browser,
+  # otherwise a boot race leaves a "connection refused" page on screen forever.
+  cat > /usr/local/bin/lumina-kiosk <<'EOF'
+#!/bin/sh
+until curl -sf -o /dev/null http://localhost/player; do
+  sleep 2
+done
+
+BROWSER="$(command -v chromium-browser || command -v chromium)"
+[ -n "$BROWSER" ] || exit 1
+# --autoplay-policy is required for signage: without it Chromium blocks
+# autoplay with sound, so video/YouTube items never start on their own.
+exec "$BROWSER" \
+  --kiosk \
+  --incognito \
+  --noerrdialogs \
+  --disable-session-crashed-bubble \
+  --no-first-run \
+  --autoplay-policy=no-user-gesture-required \
+  http://localhost/player
+EOF
+  chmod 0755 /usr/local/bin/lumina-kiosk
+
+  # No OnlyShowIn here: Raspberry Pi OS Bookworm sessions identify as
+  # LXDE-pi-wayfire / wayfire / labwc, so an OnlyShowIn=LXDE entry never runs.
   mkdir -p /etc/xdg/autostart
   cat > /etc/xdg/autostart/lumina-player.desktop <<EOF
 [Desktop Entry]
 Type=Application
 Name=LuminaShow Player
-Exec=sh -c '(command -v chromium-browser >/dev/null && chromium-browser --kiosk --incognito --noerrdialogs --disable-session-crashed-bubble http://localhost/player) || (command -v chromium >/dev/null && chromium --kiosk --incognito --noerrdialogs --disable-session-crashed-bubble http://localhost/player)'
+Exec=/usr/local/bin/lumina-kiosk
 X-GNOME-Autostart-enabled=true
-OnlyShowIn=LXDE;
 EOF
+
+  # Keep the display awake — signage must not blank after 10 minutes.
+  if command -v raspi-config >/dev/null 2>&1; then
+    raspi-config nonint do_blanking 1 || true
+  fi
 
   # Ensure kiosk user can auto-login in Raspberry Pi OS Desktop.
   if [[ -f /etc/lightdm/lightdm.conf ]]; then

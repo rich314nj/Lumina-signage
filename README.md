@@ -293,15 +293,17 @@ The playlist ID is visible in the API response or URL when editing.
 
 For a dedicated display, configure your browser to:
 1. Open `http://<server>/player` on startup
-2. Enable kiosk mode (e.g., `chromium-browser --kiosk http://...`)
+2. Enable kiosk mode with autoplay allowed (e.g., `chromium-browser --kiosk --autoplay-policy=no-user-gesture-required http://...`)
 
-Example autostart for Raspberry Pi kiosk:
+> **Note:** `--autoplay-policy=no-user-gesture-required` is required — without it Chromium blocks autoplay with sound, so video and YouTube items will not start on their own.
+
+On Raspberry Pi, `install_rpi.sh --kiosk-user <user>` sets this up automatically: it installs a `/usr/local/bin/lumina-kiosk` launcher that waits for the server to come up, starts Chromium in kiosk mode with autoplay enabled, and disables screen blanking. Manual autostart example:
 ```bash
 # /etc/xdg/autostart/lumina-player.desktop
 [Desktop Entry]
 Type=Application
 Name=LuminaShow Player
-Exec=chromium-browser --kiosk --noerrdialogs --disable-infobars http://localhost/player
+Exec=chromium-browser --kiosk --noerrdialogs --autoplay-policy=no-user-gesture-required http://localhost/player
 ```
 
 ---
