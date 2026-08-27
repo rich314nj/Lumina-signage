@@ -37,9 +37,11 @@ else
   echo -e "${GREEN}✓${RESET} Application removed (uploads preserved at /opt/lumina-signage/static/uploads/)"
 fi
 
-rm -f /usr/local/sbin/lumina-net
-rm -f /etc/sudoers.d/lumina-net
-echo -e "${GREEN}✓${RESET} Network helper removed"
+rm -f /usr/local/sbin/lumina-net /usr/local/sbin/lumina-update
+rm -f /usr/local/sbin/lumina-netwatch /usr/local/bin/lumina-kiosk
+rm -f /etc/sudoers.d/lumina-net /etc/sudoers.d/lumina-update
+rm -rf /var/lib/lumina
+echo -e "${GREEN}✓${RESET} Helper scripts removed"
 
 userdel lumina 2>/dev/null || true
 echo -e "${GREEN}✓${RESET} System user removed"

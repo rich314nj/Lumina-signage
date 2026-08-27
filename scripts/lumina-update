@@ -1,0 +1,196 @@
+#!/bin/bash
+set -euo pipefail
+
+# In-place updater for LuminaShow (#9).
+#
+# Installed to /usr/local/sbin/lumina-update and invoked through a narrowly
+# scoped sudoers grant, like scripts/lumina-net. It takes no user-supplied
+# arguments — only a fixed subcommand — so there is no injection surface.
+#
+# The database, uploads, and .env are preserved. The previous code tree is
+# kept so a failed update can be rolled back, and the new version is health
+# checked before the update is declared successful.
+
+REPO="${LUMINA_UPDATE_REPO:-rich314nj/Lumina-signage}"
+BRANCH="${LUMINA_UPDATE_BRANCH:-main}"
+INSTALL_DIR="${LUMINA_INSTALL_DIR:-/opt/lumina-signage}"
+APP_USER="${LUMINA_APP_USER:-lumina}"
+STATE_DIR="/var/lib/lumina"
+STATUS_FILE="$STATE_DIR/update-status"
+BACKUP_DIR="/var/backups/lumina"
+HEALTH_URL="${LUMINA_HEALTH_URL:-http://localhost/api/device-info}"
+
+RAW_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/app.py"
+TARBALL_URL="https://codeload.github.com/${REPO}/tar.gz/refs/heads/${BRANCH}"
+
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+version_in() {
+  # Reads __version__ = "x.y.z" from an app.py, on stdin or at a path.
+  grep -m1 '^__version__' "${1:--}" 2>/dev/null | cut -d'"' -f2 || true
+}
+
+installed_version() { version_in "$INSTALL_DIR/app.py"; }
+
+available_version() {
+  curl -fsSL --max-time 20 "$RAW_URL" 2>/dev/null |
+    grep -m1 '^__version__' | cut -d'"' -f2 || true
+}
+
+write_status() {
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "$@" > "$STATUS_FILE"
+  chmod 0644 "$STATUS_FILE"
+}
+
+fail() {
+  write_status "state=failed" "finished=$(now)" "message=$1"
+  echo "$1" >&2
+  exit 1
+}
+
+# ── check ────────────────────────────────────────────────────────────────────
+cmd_check() {
+  local installed available
+  installed="$(installed_version)"
+  available="$(available_version)"
+  echo "installed=${installed:-unknown}"
+  if [[ -z "$available" ]]; then
+    echo "available="
+    echo "reachable=no"
+  else
+    echo "available=${available}"
+    echo "reachable=yes"
+  fi
+}
+
+# ── apply ────────────────────────────────────────────────────────────────────
+cmd_apply() {
+  local installed available workdir src backup stamp
+  installed="$(installed_version)"
+  available="$(available_version)"
+  [[ -n "$available" ]] || fail "Could not reach GitHub to download the update."
+
+  write_status "state=running" "started=$(now)" \
+    "from=${installed:-unknown}" "to=${available}" "message=Downloading"
+
+  workdir="$(mktemp -d)"
+  # shellcheck disable=SC2064  # expand workdir now, not at trap time
+  trap "rm -rf '$workdir'" EXIT
+
+  curl -fsSL --max-time 300 -o "$workdir/src.tar.gz" "$TARBALL_URL" ||
+    fail "Download failed."
+
+  tar -xzf "$workdir/src.tar.gz" -C "$workdir" || fail "Downloaded archive is not readable."
+  src="$(find "$workdir" -maxdepth 1 -type d -name '*-*' | head -n1)"
+  [[ -n "$src" && -f "$src/app.py" ]] || fail "Downloaded archive does not look like LuminaShow."
+
+  # Back up the database, config, and the current code so a failure is
+  # recoverable rather than terminal.
+  stamp="$(date -u +%Y%m%d-%H%M%S)"
+  backup="$BACKUP_DIR/$stamp"
+  mkdir -p "$backup"
+  [[ -f "$INSTALL_DIR/lumina.db" ]] && cp -a "$INSTALL_DIR/lumina.db" "$backup/" || true
+  [[ -f "$INSTALL_DIR/.env" ]] && cp -a "$INSTALL_DIR/.env" "$backup/" || true
+  rsync -a --exclude 'venv' --exclude 'static/uploads' --exclude 'lumina.db' \
+    "$INSTALL_DIR/" "$backup/code/" || fail "Could not back up the current install."
+
+  write_status "state=running" "started=$(now)" \
+    "from=${installed:-unknown}" "to=${available}" "message=Installing"
+
+  systemctl stop lumina.service >/dev/null 2>&1 || true
+
+  rsync -a --delete \
+    --exclude '.git' \
+    --exclude 'venv' \
+    --exclude 'static/uploads' \
+    --exclude 'lumina.db' \
+    --exclude '.env' \
+    "$src/" "$INSTALL_DIR/" || fail "Could not copy the new version into place."
+
+  "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip >/dev/null 2>&1 || true
+  if ! "$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"; then
+    rollback "$backup" "Dependency installation failed."
+  fi
+
+  # Refresh the privileged helpers, which ship with the app.
+  for helper in lumina-net lumina-update; do
+    [[ -f "$INSTALL_DIR/scripts/$helper" ]] || continue
+    install -m 0755 "$INSTALL_DIR/scripts/$helper" "/usr/local/sbin/$helper"
+    sed -i 's/\r$//' "/usr/local/sbin/$helper"
+  done
+  for helper in lumina-kiosk lumina-netwatch; do
+    [[ -f "$INSTALL_DIR/scripts/$helper" ]] || continue
+    if [[ "$helper" == "lumina-kiosk" ]]; then
+      install -m 0755 "$INSTALL_DIR/scripts/$helper" "/usr/local/bin/$helper"
+      sed -i 's/\r$//' "/usr/local/bin/$helper"
+    else
+      install -m 0755 "$INSTALL_DIR/scripts/$helper" "/usr/local/sbin/$helper"
+      sed -i 's/\r$//' "/usr/local/sbin/$helper"
+    fi
+  done
+
+  chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
+
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl start lumina.service || rollback "$backup" "Service failed to start."
+
+  # Health check before declaring success.
+  local healthy=no
+  for _ in $(seq 1 20); do
+    if curl -sf -o /dev/null --max-time 5 "$HEALTH_URL"; then
+      healthy=yes
+      break
+    fi
+    sleep 2
+  done
+  [[ "$healthy" == yes ]] || rollback "$backup" "New version did not respond after starting."
+
+  systemctl restart lumina-kiosk.service >/dev/null 2>&1 || true
+
+  write_status "state=success" "finished=$(now)" \
+    "from=${installed:-unknown}" "to=${available}" \
+    "message=Updated to ${available}"
+}
+
+rollback() {
+  local backup="$1" reason="$2"
+  systemctl stop lumina.service >/dev/null 2>&1 || true
+  if [[ -d "$backup/code" ]]; then
+    rsync -a --delete \
+      --exclude 'venv' --exclude 'static/uploads' --exclude 'lumina.db' \
+      "$backup/code/" "$INSTALL_DIR/" || true
+  fi
+  [[ -f "$backup/lumina.db" ]] && cp -a "$backup/lumina.db" "$INSTALL_DIR/" || true
+  [[ -f "$backup/.env" ]] && cp -a "$backup/.env" "$INSTALL_DIR/" || true
+  chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR" || true
+  "$INSTALL_DIR/venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt" >/dev/null 2>&1 || true
+  systemctl start lumina.service >/dev/null 2>&1 || true
+  fail "${reason} Rolled back to the previous version."
+}
+
+case "${1:-}" in
+  check)
+    cmd_check
+    ;;
+  apply)
+    # Run detached in its own transient unit: this restarts lumina.service,
+    # which would otherwise kill the process that requested the update.
+    if command -v systemd-run >/dev/null 2>&1; then
+      write_status "state=running" "started=$(now)" "message=Starting"
+      exec systemd-run --quiet --unit=lumina-update --collect \
+        --description="LuminaShow update" "$0" _apply
+    fi
+    cmd_apply
+    ;;
+  _apply)
+    cmd_apply
+    ;;
+  status)
+    [[ -f "$STATUS_FILE" ]] && cat "$STATUS_FILE" || echo "state=idle"
+    ;;
+  *)
+    echo "usage: lumina-update {check|apply|status}" >&2
+    exit 1
+    ;;
+esac

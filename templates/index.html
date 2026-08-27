@@ -220,6 +220,7 @@ select option { background: var(--surface2); }
         <span class="nav-label">Admin</span>
         <div class="nav-item" onclick="navigate('users')"><span class="nav-icon">⊙</span><span>Users</span></div>
         <div class="nav-item" onclick="navigate('network')"><span class="nav-icon">⇄</span><span>Network</span></div>
+        <div class="nav-item" onclick="navigate('system')"><span class="nav-icon">⚙</span><span>System</span></div>
       </div>
       <div class="nav-section">
         <span class="nav-label">Display</span>
@@ -318,6 +319,29 @@ select option { background: var(--surface2); }
               <button class="btn btn-secondary btn-sm" id="wifiScanBtn" onclick="scanWifi()">⟳ Scan</button>
             </div>
             <div id="wifiList" style="padding:16px 20px;font-size:13px;color:var(--text3)">Click Scan to search for nearby networks.</div>
+          </div>
+        </div>
+      </div>
+      <div id="page-system" class="page">
+        <div class="page-header">
+          <div><div class="page-title">System</div><div class="page-subtitle">Software version and updates for this device</div></div>
+          <div class="header-actions"><button class="btn btn-secondary" onclick="loadSystem()">↻ Refresh</button></div>
+        </div>
+        <div class="card" style="max-width:640px">
+          <div class="card-header"><span class="card-title">Software</span></div>
+          <div style="padding:18px 20px;display:flex;flex-direction:column;gap:16px">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;font-family:var(--font-mono);font-size:13px">
+              <div>
+                <div style="color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:1px">Installed</div>
+                <div id="sysInstalled" style="font-size:16px;font-weight:700">—</div>
+              </div>
+              <div>
+                <div style="color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:1px">Latest available</div>
+                <div id="sysAvailable" style="font-size:16px;font-weight:700">—</div>
+              </div>
+            </div>
+            <div id="sysMessage" style="font-size:13px;color:var(--text2)">Checking…</div>
+            <div id="sysActions" style="display:flex;gap:10px;flex-wrap:wrap"></div>
           </div>
         </div>
       </div>
@@ -553,6 +577,7 @@ async function loadPage(page) {
   else if (page === 'schedules') await loadSchedules();
   else if (page === 'users') await loadUsers();
   else if (page === 'network') await loadNetwork();
+  else if (page === 'system') await loadSystem();
 }
 
 // ── Theme ──────────────────────────────────────────────────────────────────────
@@ -1189,6 +1214,79 @@ async function doApplyIp() {
   }
   btn.disabled = false;
   btn.textContent = 'Apply';
+}
+
+// ── System / updates ───────────────────────────────────────────────────────────
+let updatePoll = null;
+
+async function loadSystem() {
+  const msg = document.getElementById('sysMessage');
+  const actions = document.getElementById('sysActions');
+  try {
+    const s = await api('GET', '/api/update/status');
+    document.getElementById('sysInstalled').textContent = 'v' + s.installed;
+    document.getElementById('sysAvailable').textContent = s.available ? 'v' + s.available : '—';
+
+    const running = s.last && s.last.state === 'running';
+    actions.innerHTML = '';
+
+    if (!s.supported) {
+      msg.textContent = 'Updates are managed outside the app on this install — the update helper is not present.';
+      return;
+    }
+    if (running) {
+      msg.textContent = 'Updating… ' + (s.last.message || '') +
+        ' This device may be briefly unreachable.';
+      startUpdatePoll();
+      return;
+    }
+    stopUpdatePoll();
+
+    if (!s.reachable) {
+      msg.textContent = 'Could not reach GitHub to check for updates. The device may be offline.';
+    } else if (s.update_available) {
+      msg.innerHTML = `Version <b>${esc(s.available)}</b> is available.`;
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.textContent = 'Install update';
+      btn.onclick = applyUpdate;
+      actions.appendChild(btn);
+    } else {
+      msg.textContent = 'This device is up to date.';
+    }
+
+    if (s.last && s.last.state === 'success') {
+      msg.innerHTML += `<div style="margin-top:8px;font-size:12px;color:var(--green)">Last update: ${esc(s.last.message || 'succeeded')}</div>`;
+    } else if (s.last && s.last.state === 'failed') {
+      msg.innerHTML += `<div style="margin-top:8px;font-size:12px;color:var(--red)">Last update failed: ${esc(s.last.message || 'unknown error')}</div>`;
+    }
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+}
+
+function startUpdatePoll() {
+  if (updatePoll) return;
+  updatePoll = setInterval(() => {
+    if (state.currentPage !== 'system') { stopUpdatePoll(); return; }
+    loadSystem();
+  }, 5000);
+}
+
+function stopUpdatePoll() {
+  if (updatePoll) { clearInterval(updatePoll); updatePoll = null; }
+}
+
+async function applyUpdate() {
+  if (!confirm('Install the update now?\n\nThe player will restart and this page may be briefly unavailable. Content and settings are preserved, and a failed update rolls back automatically.')) return;
+  try {
+    await api('POST', '/api/update/apply');
+    toast('Update started', 'success');
+    document.getElementById('sysMessage').textContent =
+      'Updating… this device may be briefly unreachable.';
+    document.getElementById('sysActions').innerHTML = '';
+    startUpdatePoll();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ── Toggles ────────────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ Self-hosted digital signage for Raspberry Pi 4/5. Positioned as a direct
 replacement for Anthias/Screenly OSE, with the differentiator being **setup and
 network management that a non-technical person can do without a keyboard**.
 
-Repo: `rich314nj/Lumina-signage` · Current version: **1.7.1**
+Repo: `rich314nj/Lumina-signage` · Current version: **1.8.0**
 
 ---
 
@@ -64,14 +64,19 @@ is a bug — that failure mode silently produced a blank device once already.
 python app.py                 # http://localhost:8080, admin / admin123
 ```
 
-Verification used in place of a test suite (see #22 — there is no test suite yet):
-
 ```bash
-python -c "import ast; ast.parse(open('app.py', encoding='utf-8').read())"
+pip install -r requirements-dev.txt
+python -m pytest              # 106 tests; also runs in CI on 3.11 and 3.12
 bash -n install_rpi.sh scripts/lumina-*    # CI also runs shellcheck
 ```
 
-For player/admin JS, extract the inline `<script>` block and run `node --check`.
+Tests live in `tests/`. `DATABASE_URL` points them at a scratch database, set in
+`conftest.py` **before** importing `app` — the app configures itself at import
+time, so that ordering matters.
+
+For player/admin JS there is no test runner: extract the inline `<script>` block
+and run `node --check`, then exercise behaviour in a browser against a local
+server. Anything genuinely testable is better moved into Python.
 
 **Images build only on native arm64** (`ubuntu-24.04-arm` in CI). Cross-building
 under `qemu-user-static` segfaults configuring arm64 packages in the chroot —
@@ -112,16 +117,18 @@ Trust before features: the product's problem is reliability, not capability.
 - ~~#27 clicking the drop zone opened the picker but never uploaded~~
 - ~~#31 thumbnails in the Add-from-Library picker~~
 
-### Tier 2 — Make failures survivable ← **next**
-- #32 reboot / shutdown / restart-display controls
+### Tier 2 — Make failures survivable ← **next** (deferred past Tier 3)
+- #32 reboot / shutdown / restart-display controls — the **System** page added
+  in 1.8.0 is the obvious home for these
 - #10 health reporting, especially a player heartbeat
 - #15 vendor PDF.js locally (PDFs currently need internet)
 - #28 remainder — Network page should explain a blocked WiFi radio
 
-### Tier 3 — Lock it in, then make it shippable
-- #22 test suite — schedule resolution and URL parsers first
-- #9 update path — **required before deploying anywhere you cannot walk to**
-  (also fixes version reporting end to end)
+### Tier 3 — Lock it in, then make it shippable ✅ done in 1.8.0
+- ~~#22 test suite~~ — 106 tests in `tests/`, CI on 3.11 and 3.12
+- ~~#9 update path~~ — `scripts/lumina-update` + the System page. **Untested on
+  real hardware**: the first genuine test is updating a device from 1.8.0 to
+  whatever ships next. Until that has happened once, treat it as unproven.
 
 ### Tier 4 — Hardening
 - #11 SD card wear · #12 per-device credentials · #23 backup/restore ·

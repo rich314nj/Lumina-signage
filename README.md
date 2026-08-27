@@ -321,12 +321,20 @@ Exec=chromium-browser --kiosk --noerrdialogs --autoplay-policy=no-user-gesture-r
 
 ## Upgrading
 
+**From the admin UI (recommended):** go to **System**. It shows the installed
+version, checks for a newer one, and installs it with one click.
+
+Your database, uploads, and configuration are preserved. The previous version is
+backed up to `/var/backups/lumina/` first, and the new version is health checked
+after starting — if it fails to install, start, or respond, the update rolls back
+automatically.
+
+**From the command line:**
+
 ```bash
-cd /path/to/lumina-signage
-git pull
-sudo cp -r . /opt/lumina-signage/
-sudo /opt/lumina-signage/venv/bin/pip install -r requirements.txt
-sudo systemctl restart lumina
+sudo lumina-update check    # what is installed, and what is available
+sudo lumina-update apply    # install the latest version
+sudo lumina-update status   # how the last attempt went
 ```
 
 ---
@@ -433,6 +441,13 @@ curl -b cookies.txt -X PUT http://localhost/api/playlists/<id> \
 | GET | `/api/stats` | Dashboard statistics |
 | GET | `/api/me` | Current user info |
 | GET | `/api/current-playlist` | Currently scheduled playlist |
+
+### Updates (Admin only)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/update/status` | Installed version, latest available, last update result |
+| POST | `/api/update/apply` | Start an update (returns immediately; poll status) |
 
 ### Network (Admin only, requires NetworkManager)
 

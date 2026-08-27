@@ -226,6 +226,17 @@ EOF
   chmod 0440 /etc/sudoers.d/lumina-net
 fi
 
+# In-place updater, invoked from the admin UI through its own scoped grant.
+if [[ -f "$INSTALL_DIR/scripts/lumina-update" ]]; then
+  install -m 0755 "$INSTALL_DIR/scripts/lumina-update" /usr/local/sbin/lumina-update
+  sed -i 's/\r$//' /usr/local/sbin/lumina-update
+  cat > /etc/sudoers.d/lumina-update <<EOF
+$APP_USER ALL=(root) NOPASSWD: /usr/local/sbin/lumina-update
+EOF
+  chmod 0440 /etc/sudoers.d/lumina-update
+  mkdir -p /var/lib/lumina /var/backups/lumina
+fi
+
 # ImageMagick on Debian often blocks PDF by default.
 for policy_file in /etc/ImageMagick-*/policy.xml; do
   [[ -f "$policy_file" ]] || continue

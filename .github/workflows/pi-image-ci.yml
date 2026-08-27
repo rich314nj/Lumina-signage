@@ -72,7 +72,10 @@ jobs:
       - name: Shellcheck
         run: |
           shellcheck install_rpi.sh
+          shellcheck install.sh
+          shellcheck uninstall.sh
           shellcheck scripts/lumina-net
+          shellcheck scripts/lumina-update
           shellcheck scripts/lumina-kiosk
           shellcheck scripts/lumina-netwatch
           shellcheck image/pi-gen/build-image.sh

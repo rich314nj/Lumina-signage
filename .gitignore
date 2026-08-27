@@ -5,3 +5,6 @@ __pycache__/
 lumina.db
 
 .claude/
+
+.pytest_cache/
+tests/__pycache__/

@@ -6,7 +6,7 @@ Similar to Anthias/Screenly
 
 # Single source of truth for the version. Templates read it via the
 # app_version context processor; do not hardcode it in the UI.
-__version__ = "1.7.1"
+__version__ = "1.8.0"
 
 import os
 import re
@@ -45,7 +45,11 @@ MAX_CONTENT_LENGTH = 2 * 1024 * 1024 * 1024  # 2 GB
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
-app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{BASE_DIR / 'lumina.db'}"
+# DATABASE_URL lets tests point at a scratch database, and lets an operator
+# move the database off the SD card onto external storage (see #11).
+app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
+    "DATABASE_URL", f"sqlite:///{BASE_DIR / 'lumina.db'}"
+)
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
@@ -1003,6 +1007,80 @@ def split_terse(line):
             cur += ch
     parts.append(cur)
     return parts
+
+
+# ── API: Updates (Admin) ──────────────────────────────────────────────────────
+
+UPDATE_HELPER = "/usr/local/sbin/lumina-update"
+
+
+def run_update_helper(action, timeout=60):
+    if not os.path.exists(UPDATE_HELPER):
+        return -1, "", "Update helper is not installed on this device"
+    if os.geteuid() == 0:
+        return run_cmd([UPDATE_HELPER, action], timeout)
+    return run_cmd(["sudo", "-n", UPDATE_HELPER, action], timeout)
+
+
+def parse_kv(text):
+    """Parse the helper's key=value output."""
+    out = {}
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep:
+            out[key.strip()] = value.strip()
+    return out
+
+
+@app.route("/api/update/status")
+@login_required
+@role_required("admin")
+def api_update_status():
+    """Installed version, what is available, and how the last update went."""
+    result = {
+        "installed": __version__,
+        "available": None,
+        "update_available": False,
+        "reachable": False,
+        "supported": os.path.exists(UPDATE_HELPER),
+        "last": None,
+    }
+    if not result["supported"]:
+        return jsonify(result)
+
+    rc, out, _ = run_update_helper("check", timeout=45)
+    if rc == 0:
+        info = parse_kv(out)
+        available = info.get("available") or None
+        result["available"] = available
+        result["reachable"] = info.get("reachable") == "yes"
+        # String inequality is deliberate: any difference from what GitHub
+        # reports is worth surfacing, including a downgrade after a rollback.
+        result["update_available"] = bool(available and available != __version__)
+
+    rc2, out2, _ = run_update_helper("status", timeout=15)
+    if rc2 == 0:
+        last = parse_kv(out2)
+        if last.get("state") and last["state"] != "idle":
+            result["last"] = last
+    return jsonify(result)
+
+
+@app.route("/api/update/apply", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_update_apply():
+    """Start an update. Returns immediately; poll /api/update/status."""
+    if not os.path.exists(UPDATE_HELPER):
+        return jsonify({"error": "Update helper is not installed on this device"}), 503
+    rc, out, err = run_update_helper("apply", timeout=60)
+    if rc != 0:
+        return jsonify({"error": err or out or "Could not start the update"}), 502
+    return jsonify({
+        "success": True,
+        "message": "Update started. The device will restart its services and "
+                   "may be briefly unreachable.",
+    })
 
 
 SETUP_AP_CON = "lumina-setup-ap"

@@ -5,6 +5,54 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.8.0] — 2026-08-27
+
+Tier 3 of the roadmap in `CLAUDE.md`: lock the behaviour in with tests, then
+make fixes deliverable to devices in the field.
+
+### Added
+
+- **Automated test suite** (#22) — 106 tests covering the areas most likely to
+  break silently, run on every push and pull request across Python 3.11 and 3.12
+  via a new `Tests` workflow.
+  - **Schedule resolution** — half-open interval boundaries, windows crossing
+    midnight, the `23:59` end-of-day special case, full-day windows, overlap
+    detection including the back-to-back case that must *not* count as a clash.
+  - **URL parsing** — every supported YouTube and Vimeo form plus malformed and
+    non-string input, and the asset-type detection that depends on both.
+  - **API behaviour** — authentication, role enforcement, the `400`/`409` error
+    paths, and that `/api/current-playlist` and `/api/device-info` stay reachable
+    without a session, which the kiosk depends on.
+  - **Regression tests for #26**, so a role change persists and a new user gets
+    the role that was requested.
+- **In-place updates** (#9) — a new **System** page (Admin only) shows the
+  installed version, checks GitHub for a newer one, and installs it with one
+  click. The work is done by `scripts/lumina-update`, invoked through its own
+  narrowly scoped sudoers grant:
+  - The database, uploads, and `.env` are preserved.
+  - The database, config, **and the previous code tree** are backed up to
+    `/var/backups/lumina/<timestamp>` before anything is replaced.
+  - The new version is **health checked after starting**; if it fails to install
+    dependencies, fails to start, or does not respond, the update **rolls back
+    automatically** to the previous version.
+  - The update runs in its own transient systemd unit, so restarting the
+    application does not kill the update that requested it.
+  - Progress and the outcome of the last attempt are reported in the UI.
+- `GET /api/update/status` and `POST /api/update/apply` (Admin only). Both
+  degrade gracefully where the helper is not installed, rather than erroring.
+
+### Changed
+
+- `DATABASE_URL` now overrides the database location. Tests use it for a scratch
+  database, and it allows moving the database off the SD card onto external
+  storage (relevant to #11).
+- The image-build workflow now shellchecks `install.sh` and `uninstall.sh` too,
+  not just the Pi scripts.
+- `uninstall.sh` removes all four helper scripts and both sudoers entries; it
+  previously left `lumina-kiosk` and `lumina-netwatch` behind.
+
+---
+
 ## [1.7.1] — 2026-08-27
 
 Tier 1 of the roadmap in `CLAUDE.md`: the confirmed defects from hardware testing.
