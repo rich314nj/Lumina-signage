@@ -126,6 +126,8 @@ tbody tr:last-child td { border-bottom: none; }
 .pl-item-meta { font-size: 10px; color: var(--text3); font-family: var(--font-mono); }
 .pl-item-dur { width: 60px; }
 .pl-item-dur input { width: 100%; background: var(--surface2); border: 1px solid var(--border2); color: var(--text); padding: 4px 6px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 12px; text-align: center; }
+.picker-thumb { width: 52px; height: 30px; border-radius: 4px; background: var(--surface2); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 15px; overflow: hidden; }
+.picker-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .form-grid { display: grid; gap: 16px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .form-group { display: flex; flex-direction: column; gap: 6px; }
@@ -257,6 +259,9 @@ select option { background: var(--surface2); }
           <div class="upload-title">Drop files here to upload</div>
           <div class="upload-hint">JPG · PNG · GIF · BMP · WEBP · PNM · MP4 · MKV · AVI · MOV · FLV · TS · MPEG · PDF</div>
         </div>
+        <input type="file" id="dropZoneFile" multiple
+               accept=".jpg,.jpeg,.png,.pnm,.gif,.bmp,.webp,.avi,.mkv,.mov,.mpg,.mpeg,.mp4,.ts,.flv,.pdf"
+               style="display:none">
         <div id="assetsGrid" class="asset-grid"></div>
       </div>
       <div id="page-playlists" class="page">
@@ -474,7 +479,7 @@ select option { background: var(--surface2); }
       </div>
       <div class="form-row">
         <div class="form-group"><label>Password</label><input type="password" id="userPassword" placeholder="Leave blank to keep existing"></div>
-        <div class="form-group"><label>Role</label><select id="userRole"><option value="viewer">Viewer — Read only</option><option value="editor">Editor — Manage content</option><option value="admin">Admin — Full access</option></select></div>
+        <div class="form-group"><label>Role</label><select id="userRoleSelect"><option value="viewer">Viewer — Read only</option><option value="editor">Editor — Manage content</option><option value="admin">Admin — Full access</option></select></div>
       </div>
       <div class="form-group">
         <label class="toggle" onclick="toggleUserActive()"><div class="toggle-track on" id="userActiveToggle"><div class="toggle-thumb"></div></div><span class="toggle-label">Account Active</span></label>
@@ -704,17 +709,43 @@ async function deleteAsset(id) {
   catch (e) { toast(e.message,'error'); }
 }
 
+// Shared by both drop-zone paths. Reports what actually happened rather than
+// claiming success unconditionally.
+async function uploadFiles(files) {
+  if (!files.length) return;
+  let ok = 0, failed = 0;
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch('/api/assets', { method: 'POST', body: fd });
+      if (res.ok) ok++; else failed++;
+    } catch (e) { failed++; }
+  }
+  if (ok) toast(`Uploaded ${ok} file${ok === 1 ? '' : 's'}`, 'success');
+  if (failed) toast(`${failed} file${failed === 1 ? '' : 's'} failed to upload`, 'error');
+  await loadAssets();
+}
+
 const dropZone = document.getElementById('dropZone');
+const dropZoneFile = document.getElementById('dropZoneFile');
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 dropZone.addEventListener('drop', async e => {
   e.preventDefault(); dropZone.classList.remove('drag-over');
-  const files = Array.from(e.dataTransfer.files);
-  for (const file of files) { const fd=new FormData(); fd.append('file',file); try{await fetch('/api/assets',{method:'POST',body:fd});}catch{} }
-  toast(`Uploaded ${files.length} file(s)`,'success');
-  await loadAssets();
+  await uploadFiles(Array.from(e.dataTransfer.files));
 });
-dropZone.addEventListener('click', () => document.getElementById('uploadFile').click());
+
+// FIX #27: clicking the drop zone used to open the upload modal's file input,
+// which has no change handler — a file could be selected and nothing happened.
+// Use a dedicated input so this path uploads immediately, like dropping does,
+// and cannot interfere with the modal's own Upload button.
+dropZone.addEventListener('click', () => dropZoneFile.click());
+dropZoneFile.addEventListener('change', async () => {
+  const files = Array.from(dropZoneFile.files);
+  dropZoneFile.value = '';  // so re-selecting the same file fires change again
+  await uploadFiles(files);
+});
 
 // ── Playlists ──────────────────────────────────────────────────────────────────
 async function loadPlaylists() {
@@ -801,12 +832,19 @@ function addToPlaylist(assetId) {
 function filterAssetPicker(q) { renderAssetPicker(q); }
 function renderAssetPicker(q) {
   const filtered=state.allAssets.filter(a=>!q||a.name.toLowerCase().includes(q.toLowerCase()));
-  document.getElementById('assetPicker').innerHTML=filtered.map(a=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px" onclick="addToPlaylist('${esc(a.id)}')">
-      <span style="font-size:16px">${assetIcon(a.asset_type)}</span>
+  // FIX #31: show the real thumbnail — filenames alone make picking the right
+  // image hard once the library grows.
+  document.getElementById('assetPicker').innerHTML=filtered.map(a=>{
+    const thumb = a.thumbnail
+      ? `<div class="picker-thumb"><img src="${esc(a.thumbnail)}" alt="" onerror="this.parentNode.innerHTML='${assetIcon(a.asset_type)}'"></div>`
+      : `<div class="picker-thumb">${assetIcon(a.asset_type)}</div>`;
+    return `
+    <div style="display:flex;align-items:center;gap:10px;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;font-size:12px" onclick="addToPlaylist('${esc(a.id)}')">
+      ${thumb}
       <div style="flex:1;min-width:0"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.name)}</div><div style="color:var(--text3);font-family:var(--font-mono);font-size:10px">${a.asset_type} · ${a.duration}s</div></div>
       <span style="color:var(--accent);font-size:16px">+</span>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 async function doSavePlaylist() {
@@ -930,7 +968,7 @@ function openUserModal() {
   document.getElementById('userUsername').value='';
   document.getElementById('userEmail').value='';
   document.getElementById('userPassword').value='';
-  document.getElementById('userRole').value='viewer';
+  document.getElementById('userRoleSelect').value='viewer';
   document.getElementById('userUsername').disabled=false;
   state.userActive=true; setToggle('userActiveToggle',true);
   openModal('userModal');
@@ -945,14 +983,14 @@ function openEditUser(id) {
   document.getElementById('userUsername').disabled=true;
   document.getElementById('userEmail').value=u.email;
   document.getElementById('userPassword').value='';
-  document.getElementById('userRole').value=u.role;
+  document.getElementById('userRoleSelect').value=u.role;
   state.userActive=u.is_active; setToggle('userActiveToggle',u.is_active);
   openModal('userModal');
 }
 
 async function doSaveUser() {
   const id=document.getElementById('editUserId').value;
-  const body={username:document.getElementById('userUsername').value.trim(),email:document.getElementById('userEmail').value.trim(),role:document.getElementById('userRole').value,is_active:state.userActive};
+  const body={username:document.getElementById('userUsername').value.trim(),email:document.getElementById('userEmail').value.trim(),role:document.getElementById('userRoleSelect').value,is_active:state.userActive};
   const pw=document.getElementById('userPassword').value; if (pw) body.password=pw;
   if (!id&&!pw) { toast('Password required for new users','error'); return; }
   try { if(id) await api('PUT',`/api/users/${id}`,body); else await api('POST','/api/users',body); toast('User saved!','success'); closeModal('userModal'); await loadUsers(); }

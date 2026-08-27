@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.7.1] — 2026-08-27
+
+Tier 1 of the roadmap in `CLAUDE.md`: the confirmed defects from hardware testing.
+
+### Fixed
+
+- **[High] Changing a user's role had no effect, and every new user was created as a Viewer** (#26) — `templates/index.html` defined `userRole` twice: the role badge in the topbar and the role dropdown in the user modal. `getElementById` returns the first match, so all role handling was reading and writing the *badge*. The role was read as `undefined`, `JSON.stringify` omits undefined keys, and the API therefore never received a role at all — leaving it unchanged on update and falling back to `viewer` on create, regardless of what was selected. The dropdown is now `userRoleSelect`. All templates were swept for other duplicate ids; there are none.
+- **[Medium] Clicking the drop zone opened the file picker but never uploaded** (#27) — the click triggered the upload modal's file input, which only uploads when the modal's own Upload button is pressed. With the modal closed, the chosen file sat in a hidden input and nothing happened, with no error. The drop zone now has its own dedicated input that uploads immediately, matching the drag-and-drop path.
+- Upload results are now reported accurately. The drag-and-drop path previously announced success unconditionally, even when every file had failed; both paths now share one helper that counts successes and failures and reports each.
+
+### Added
+
+- **Thumbnails in the Add from Library picker** (#31) — the playlist editor's asset picker showed only a generic type icon and filename, which made picking the right image difficult in a library of any size. It now shows the real thumbnail where one exists, falling back to the type icon, consistent with the Assets grid and the playlist rows.
+
+---
+
 ## [1.7.0] — 2026-08-27
 
 Tier 0 of the roadmap in `CLAUDE.md`: the defects that made a deployed screen

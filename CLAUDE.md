@@ -4,7 +4,7 @@ Self-hosted digital signage for Raspberry Pi 4/5. Positioned as a direct
 replacement for Anthias/Screenly OSE, with the differentiator being **setup and
 network management that a non-technical person can do without a keyboard**.
 
-Repo: `rich314nj/Lumina-signage` · Current version: **1.7.0**
+Repo: `rich314nj/Lumina-signage` · Current version: **1.7.1**
 
 ---
 
@@ -105,14 +105,14 @@ Trust before features: the product's problem is reliability, not capability.
 - ~~#29 kiosk white screen with no recovery~~ (bootstrap page; **root cause still
   unconfirmed — needs `journalctl -u lumina-kiosk` from the affected device**)
 
-### Tier 1 — Confirmed quick fixes ✅ mostly done in 1.7.0
+### Tier 1 — Confirmed quick fixes ✅ done in 1.7.0 / 1.7.1
 - ~~#14 transient API failure blanked a working screen~~
 - ~~#30 content changes took up to 5 minutes to appear~~
-- #26 user role never changes (duplicate `userRole` id) — **next**
-- #27 clicking the drop zone opens the picker but never uploads — **next**
-- #31 thumbnails in the Add-from-Library picker — **next**
+- ~~#26 user role never changed (duplicate `userRole` id)~~
+- ~~#27 clicking the drop zone opened the picker but never uploaded~~
+- ~~#31 thumbnails in the Add-from-Library picker~~
 
-### Tier 2 — Make failures survivable
+### Tier 2 — Make failures survivable ← **next**
 - #32 reboot / shutdown / restart-display controls
 - #10 health reporting, especially a player heartbeat
 - #15 vendor PDF.js locally (PDFs currently need internet)
