@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.4.1] — 2026-08-27
+
+### Fixed
+
+- **[High] YouTube embed errors froze the player** (#6) — When YouTube refused playback (embedding disabled, deleted video, ended live stream — reported as `api.invalidparam`), the player sat on YouTube's error screen for the item's full duration. The embed now loads with `enablejsapi=1` and an `origin` parameter, and the player listens for the embed's `onError` events via the widget postMessage protocol: broken videos display a brief reason (e.g., "embedding disabled — skipping") and advance to the next item after 1.5 seconds. Also added `playsinline=1` for reliable inline playback on kiosk browsers.
+
+---
+
 ## [1.4.0] — 2026-03-25
 
 ### Added

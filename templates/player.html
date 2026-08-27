@@ -203,6 +203,64 @@ function extractYouTubeId(url) {
   return m ? m[1] : null;
 }
 
+// ── YouTube embed error detection (issue #6) ─────────────────────────────────
+// A bare <iframe> embed gives no signal when YouTube refuses playback
+// (embedding disabled, deleted video, ended live stream → api.invalidparam):
+// the error screen just sits there for the item's full duration. With
+// enablejsapi=1 the embed speaks the widget postMessage protocol — after a
+// "listening" handshake it emits events, including onError, so broken videos
+// can be skipped.
+let ytWatchActive = false;
+let ytHandshakeTimer = null;
+
+const YT_ERROR_LABELS = {
+  2: 'invalid video id',
+  5: 'player error',
+  100: 'video not found',
+  101: 'embedding disabled',
+  150: 'embedding disabled'
+};
+
+function startYouTubeErrorWatch() {
+  ytWatchActive = true;
+  // The embed only emits events after receiving a "listening" handshake, and
+  // the iframe loads asynchronously — ping until the first message comes back
+  // (or the item is torn down).
+  let attempts = 0;
+  ytHandshakeTimer = setInterval(() => {
+    if (!ytWatchActive || ++attempts > 20) { stopYouTubeErrorWatch(ytWatchActive); return; }
+    try {
+      iframeEl.contentWindow.postMessage(
+        JSON.stringify({ event: 'listening', id: 'lumina', channel: 'widget' }),
+        'https://www.youtube.com'
+      );
+    } catch (_) {}
+  }, 500);
+}
+
+function stopYouTubeErrorWatch(keepActive) {
+  if (ytHandshakeTimer) { clearInterval(ytHandshakeTimer); ytHandshakeTimer = null; }
+  if (!keepActive) ytWatchActive = false;
+}
+
+window.addEventListener('message', (e) => {
+  if (!ytWatchActive || e.origin !== 'https://www.youtube.com') return;
+  let data;
+  try { data = JSON.parse(e.data); } catch (_) { return; }
+  if (!data || typeof data !== 'object') return;
+  // Any message back means the handshake landed — stop pinging.
+  if (ytHandshakeTimer) { clearInterval(ytHandshakeTimer); ytHandshakeTimer = null; }
+  if (data.event === 'onError') {
+    ytWatchActive = false;
+    const label = YT_ERROR_LABELS[data.info] || `error ${data.info}`;
+    metaEl.textContent = `YouTube · ${label} — skipping`;
+    // Replace the full-duration timer with a short one so the message is
+    // briefly visible, then move on.
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => safeAdvance(), 1500);
+  }
+});
+
 function extractVimeoId(url) {
   if (!url) return null;
   try {
@@ -260,6 +318,7 @@ function hideAll() {
   videoEl.onended = null;
   videoEl.src = '';
   iframeEl.src = '';
+  stopYouTubeErrorWatch(false);
   if (pdfPageTimer) { clearTimeout(pdfPageTimer); pdfPageTimer = null; }
   pdfDoc = null;
 }
@@ -318,9 +377,11 @@ function showItem(idx) {
           timer = setTimeout(() => safeAdvance(), 1000);
           break;
         }
-        iframeEl.src = `https://www.youtube.com/embed/${vid}?autoplay=1&mute=0&controls=1&rel=0`;
+        const embedOrigin = encodeURIComponent(window.location.origin);
+        iframeEl.src = `https://www.youtube.com/embed/${vid}?autoplay=1&mute=0&controls=1&rel=0&playsinline=1&enablejsapi=1&origin=${embedOrigin}`;
         iframeEl.style.display = 'block';
         metaEl.textContent = `YouTube · ${duration / 1000}s`;
+        startYouTubeErrorWatch();
         startProgress(duration);
         timer = setTimeout(() => safeAdvance(), duration);
         break;
