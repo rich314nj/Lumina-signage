@@ -18,6 +18,9 @@ libwebp-dev
 network-manager
 dnsmasq-base
 iptables
+rfkill
+iw
+wireless-regdb
 cage
 chromium-browser
 fonts-dejavu-core

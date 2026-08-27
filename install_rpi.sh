@@ -12,6 +12,9 @@ NON_INTERACTIVE=false
 SKIP_APT=false
 NO_START=false
 SETUP_AP=true
+# Two-letter ISO 3166-1 code. Raspberry Pi OS keeps the WiFi radio
+# rfkill-blocked until a regulatory country is set.
+WIFI_COUNTRY="${LUMINA_WIFI_COUNTRY:-US}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SECRET_KEY="${LUMINA_SECRET_KEY:-$(openssl rand -hex 32)}"
 
@@ -27,6 +30,8 @@ Options:
   --skip-apt                 Skip apt update/install (if already provisioned)
   --no-start                 Enable services but do not start them (image build)
   --no-setup-ap              Do not install the WiFi setup-hotspot fallback
+  --wifi-country <cc>        Wireless regulatory country (default: US).
+                             Required for WiFi to work at all; use "" to skip.
   -h, --help                 Show this help
 EOF
 }
@@ -60,6 +65,10 @@ while [[ $# -gt 0 ]]; do
     --no-setup-ap)
       SETUP_AP=false
       shift
+      ;;
+    --wifi-country)
+      WIFI_COUNTRY="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -295,6 +304,23 @@ EOF
         printf "\n[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\n" "$KIOSK_USER" >> /etc/lightdm/lightdm.conf
       fi
     fi
+  fi
+fi
+
+# Unblock the WiFi radio. Raspberry Pi OS ships it rfkill-blocked until a
+# wireless regulatory country is set, which leaves the device with no
+# scanning, no setup hotspot, and no WiFi at all — and nothing says why.
+# Image builds set this through pi-gen's WPA_COUNTRY; this covers installs
+# onto an existing system.
+if [[ -n "$WIFI_COUNTRY" ]]; then
+  if command -v raspi-config >/dev/null 2>&1; then
+    raspi-config nonint do_wifi_country "$WIFI_COUNTRY" >/dev/null 2>&1 || true
+  fi
+  if command -v iw >/dev/null 2>&1; then
+    iw reg set "$WIFI_COUNTRY" >/dev/null 2>&1 || true
+  fi
+  if command -v rfkill >/dev/null 2>&1; then
+    rfkill unblock wifi >/dev/null 2>&1 || true
   fi
 fi
 

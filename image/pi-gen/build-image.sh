@@ -21,6 +21,12 @@ FIRST_USER_NAME="${FIRST_USER_NAME:-pi}"
 FIRST_USER_PASS="${FIRST_USER_PASS:-lumina}"
 ENABLE_SSH="${ENABLE_SSH:-1}"
 TARGET_HOSTNAME="${TARGET_HOSTNAME:-lumina}"
+# Raspberry Pi OS soft-blocks the WiFi radio until a wireless regulatory
+# country is set. Without this the radio is rfkill-blocked on a fresh image:
+# no scanning, no setup hotspot, and no WiFi at all. Two-letter ISO 3166-1
+# code — override for builds outside the US.
+WPA_COUNTRY="${WPA_COUNTRY:-US}"
+TIMEZONE_DEFAULT="${TIMEZONE_DEFAULT:-America/New_York}"
 
 if [[ "${EUID}" -eq 0 ]]; then
   echo "Run as a regular user with sudo access (not as root)."
@@ -61,6 +67,8 @@ TARGET_HOSTNAME='$TARGET_HOSTNAME'
 ENABLE_SSH=$ENABLE_SSH
 FIRST_USER_NAME='$FIRST_USER_NAME'
 FIRST_USER_PASS='$FIRST_USER_PASS'
+WPA_COUNTRY='$WPA_COUNTRY'
+TIMEZONE_DEFAULT='$TIMEZONE_DEFAULT'
 STAGE_LIST="stage0 stage1 stage2 stage-lumina"
 EOF
 
@@ -71,6 +79,8 @@ Starting pi-gen build with settings:
   PIGEN_BRANCH=$PIGEN_BRANCH
   TARGET_HOSTNAME=$TARGET_HOSTNAME
   FIRST_USER_NAME=$FIRST_USER_NAME
+  WPA_COUNTRY=$WPA_COUNTRY
+  TIMEZONE_DEFAULT=$TIMEZONE_DEFAULT
 EOF
 
 cd "$PIGEN_DIR"

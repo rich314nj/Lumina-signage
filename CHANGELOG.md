@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.6.1] — 2026-08-27
+
+### Fixed
+
+- **[High] WiFi was completely unusable on the appliance image** (#28) — Raspberry Pi OS keeps the WiFi radio rfkill-blocked until a wireless regulatory country is set, and the pi-gen config never set one. The radio was blocked on every flashed device, which meant no WiFi scanning, no setup hotspot on a device with no cable, and a Network page that could not offer WiFi at all — with nothing anywhere explaining why. Image builds now set `WPA_COUNTRY` (default `US`, override with the environment variable for other regions), and `install_rpi.sh` gained `--wifi-country` (default `US`) which sets the country and unblocks the radio for installs onto an existing system. `rfkill`, `iw`, and `wireless-regdb` are now installed on the image.
+- **Device timezone defaulted to UTC** (part of #16) — the same pi-gen config block never set `TIMEZONE_DEFAULT`, so schedules ran on UTC and fired at the wrong local hour. Images now default to `America/New_York`, overridable at build time. The admin-facing timezone control tracked in #16 is still outstanding.
+
+---
+
 ## [1.6.0] — 2026-08-27
 
 ### Changed
