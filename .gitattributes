@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts and pi-gen stage files must always be LF
+*.sh text eol=lf
+EXPORT_IMAGE text eol=lf
+00-packages text eol=lf

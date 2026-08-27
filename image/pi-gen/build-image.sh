@@ -13,8 +13,10 @@ LUMINA_SRC_DIR="${ROOT_DIR}"
 
 IMG_NAME="${IMG_NAME:-lumina-rpi}"
 RELEASE="${RELEASE:-bookworm}"
-ARCH="${ARCH:-arm64}"
-DEPLOY_ZIP="${DEPLOY_ZIP:-1}"
+# 64-bit images come from pi-gen's arm64 release branches (there is no ARCH
+# config variable) — Pi 4/5 need arm64.
+PIGEN_BRANCH="${PIGEN_BRANCH:-bookworm-arm64}"
+DEPLOY_COMPRESSION="${DEPLOY_COMPRESSION:-zip}"
 FIRST_USER_NAME="${FIRST_USER_NAME:-pi}"
 FIRST_USER_PASS="${FIRST_USER_PASS:-lumina}"
 ENABLE_SSH="${ENABLE_SSH:-1}"
@@ -27,11 +29,16 @@ fi
 
 mkdir -p "$WORK_DIR"
 if [[ ! -d "$PIGEN_DIR/.git" ]]; then
-  git clone https://github.com/RPi-Distro/pi-gen.git "$PIGEN_DIR"
+  git clone --branch "$PIGEN_BRANCH" --depth 1 https://github.com/RPi-Distro/pi-gen.git "$PIGEN_DIR"
 fi
 
 rm -rf "$CUSTOM_STAGE_DST"
 cp -r "$CUSTOM_STAGE_SRC" "$CUSTOM_STAGE_DST"
+# Stage scripts must be executable and LF-terminated for pi-gen to run them.
+find "$CUSTOM_STAGE_DST" -name '*.sh' -exec sed -i 's/\r$//' {} \; -exec chmod +x {} \;
+
+# Only export the final lumina image, not the intermediate lite/desktop ones.
+touch "$PIGEN_DIR/stage2/SKIP_IMAGES" "$PIGEN_DIR/stage4/SKIP_IMAGES" 2>/dev/null || true
 
 # Package current repo snapshot for the custom stage.
 mkdir -p "$CUSTOM_STAGE_DST/01-lumina/files"
@@ -42,23 +49,24 @@ tar -C "$LUMINA_SRC_DIR" \
   --exclude "venv" \
   -czf "$CUSTOM_STAGE_DST/01-lumina/files/lumina-signage.tar.gz" .
 
+# Stages 3+4 add the desktop and Chromium — required for kiosk playback on
+# the device itself. Lite (stage2 only) would boot to a black console.
 cat > "$PIGEN_DIR/config" <<EOF
 IMG_NAME='$IMG_NAME'
 RELEASE='$RELEASE'
-ARCH='$ARCH'
-DEPLOY_ZIP=$DEPLOY_ZIP
+DEPLOY_COMPRESSION='$DEPLOY_COMPRESSION'
 TARGET_HOSTNAME='$TARGET_HOSTNAME'
 ENABLE_SSH=$ENABLE_SSH
 FIRST_USER_NAME='$FIRST_USER_NAME'
 FIRST_USER_PASS='$FIRST_USER_PASS'
-STAGE_LIST="stage0 stage1 stage2 stage-lumina"
+STAGE_LIST="stage0 stage1 stage2 stage3 stage4 stage-lumina"
 EOF
 
 cat <<EOF
 Starting pi-gen build with settings:
   IMG_NAME=$IMG_NAME
   RELEASE=$RELEASE
-  ARCH=$ARCH
+  PIGEN_BRANCH=$PIGEN_BRANCH
   TARGET_HOSTNAME=$TARGET_HOSTNAME
   FIRST_USER_NAME=$FIRST_USER_NAME
 EOF
