@@ -5,6 +5,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.7.0] — 2026-08-27
+
+Tier 0 of the roadmap in `CLAUDE.md`: the defects that made a deployed screen
+show the wrong thing, or nothing at all.
+
+### Fixed
+
+- **[Critical] The player restarted the playlist from item 1 every 5 minutes** (#13) — The reload that picks up schedule changes called `showItem(0)` on every poll regardless of whether anything had changed. Any playlist whose content ran longer than five minutes **never reached its later items**, and whatever was playing at the five-minute mark was cut off mid-item. Reported from the field as "the schedule is ignoring additional assets", which is exactly what it looked like. `loadPlaylist()` now fingerprints the playlist (id, loop flag, and each item's asset, URI, duration, and override) and only restarts playback when that fingerprint actually changes.
+- **[High] A transient API failure blanked a working screen** (#14) — Any momentary fetch failure — a service restart, an nginx reload, a network blip — replaced playing content with the setup screen. The player now keeps showing its current playlist and retries on the next poll, falling back to the setup screen only when there is genuinely nothing to display.
+- **[High] The kiosk could show a white screen forever** (#29) — Chromium was pointed straight at `/player`. If that request failed at the moment the browser launched, Chromium sat on an error page indefinitely; it will not retry on its own, so the only recovery was a power cycle. The browser now loads `static/kiosk.html`, a self-contained bootstrap page Nginx serves **from disk** — so it loads even while the application is starting or down — which polls the app and hands over to the player once it answers. *Note: this makes the failure recoverable but the original root cause is still unconfirmed; `journalctl -u lumina-kiosk` from an affected device is needed.*
+
+### Changed
+
+- **Content changes now reach the screen in seconds** (#30) — the player polls every 15 seconds instead of every 5 minutes. Safe to do frequently now that a poll no longer restarts playback. Previously an edit could take five minutes to appear with no feedback, which read as the product being broken.
+- **The version is defined in one place** — `__version__` in `app.py`, exposed to templates as `{{ app_version }}`. The admin badge and login footer had been hardcoded to `v1.2` since v1.3; both now track the real version. Groundwork for the update path in #9.
+
+### Added
+
+- **`CLAUDE.md`** — architecture, conventions, the landmines found during hardware testing, and the tiered roadmap, so work can continue a tier at a time across sessions.
+
+---
+
 ## [1.6.1] — 2026-08-27
 
 ### Fixed

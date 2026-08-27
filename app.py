@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
-LuminaShow - Digital Signage Platform for Ubuntu
+LuminaShow - Digital Signage Platform for Raspberry Pi
 Similar to Anthias/Screenly
 """
+
+# Single source of truth for the version. Templates read it via the
+# app_version context processor; do not hardcode it in the UI.
+__version__ = "1.7.0"
 
 import os
 import re
@@ -47,6 +51,12 @@ app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 
 db = SQLAlchemy(app)
+
+
+@app.context_processor
+def inject_version():
+    """Make the version available to every template as {{ app_version }}."""
+    return {"app_version": __version__}
 
 # ── Models ─────────────────────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-﻿# LuminaShow â€” Digital Signage Platform for Raspberry Pi OS
+# LuminaShow â€” Digital Signage Platform for Raspberry Pi OS
 
 > A self-hosted, open-source digital signage solution for Raspberry Pi OS â€” inspired by [Anthias/Screenly](https://github.com/Screenly/Anthias). Manage playlists, schedule content, and display media across screens from a sleek web interface.
 
@@ -142,18 +142,27 @@ venv/bin/gunicorn --bind 0.0.0.0:8080 --workers 2 app:app
 
 ```
 lumina-signage/
-â”œâ”€â”€ app.py                  # Flask application and REST API
+â”œâ”€â”€ app.py                  # Flask application and REST API (version lives here)
 â”œâ”€â”€ requirements.txt        # Python dependencies
 â”œâ”€â”€ lumina.service          # Systemd service unit
 â”œâ”€â”€ install_rpi.sh          # Raspberry Pi installer script
+â”œâ”€â”€ install.sh              # Ubuntu installer script
 â”œâ”€â”€ uninstall.sh            # Uninstaller script
+â”œâ”€â”€ CLAUDE.md               # Architecture, conventions, roadmap
+â”œâ”€â”€ scripts/                # Privileged helpers invoked via a scoped sudoers grant
+â”‚   â”œâ”€â”€ lumina-net          # Hostname / WiFi / IP changes
+â”‚   â”œâ”€â”€ lumina-kiosk        # Launches the browser for the display
+â”‚   â””â”€â”€ lumina-netwatch     # WiFi setup hotspot fallback
+â”œâ”€â”€ image/pi-gen/           # SD-card image build (custom pi-gen stage)
+â”œâ”€â”€ docs/RASPBERRY_PI.md    # Pi setup and image build documentation
 â”œâ”€â”€ templates/              # Flask HTML templates (must be this folder name)
 â”‚   â”œâ”€â”€ index.html          # Admin dashboard SPA
 â”‚   â”œâ”€â”€ login.html          # Login page
 â”‚   â””â”€â”€ player.html         # Full-screen kiosk player
 â””â”€â”€ static/
+    â”œâ”€â”€ kiosk.html          # Bootstrap page the display loads first
     â””â”€â”€ uploads/            # Uploaded media files (auto-created)
-        â””â”€â”€ thumbnails/     # Auto-generated video thumbnails
+        â””â”€â”€ thumbnails/     # Auto-generated thumbnails
 ```
 
 > **Important:** The `templates/` directory is required by Flask. The HTML files (`index.html`, `login.html`, `player.html`) must live inside `templates/` â€” not in the project root â€” or the application will fail to start with a `TemplateNotFound` error.
@@ -557,25 +566,10 @@ EOF
 
 ## Changelog
 
-### v1.1.0
+Full release history, including every fix with its severity and issue number, is in [`CHANGELOG.md`](CHANGELOG.md).
 
-**Bug Fixes**
+Architecture notes, project conventions, and the tiered roadmap are in [`CLAUDE.md`](CLAUDE.md).
 
-- **[Critical] TemplateNotFound on every page load** â€” HTML files (`index.html`, `login.html`, `player.html`) must reside in a `templates/` subdirectory. Flask's `render_template()` requires this structure; placing them in the project root caused the app to crash on startup. Added `templates/` to the project layout and documented the requirement.
-
-- **[Critical] Video items skipped twice in player** â€” `player.html` had both `videoEl.onended` and a `setTimeout` calling `advance()` independently. When a video finished naturally, both fired and the player skipped an extra item. Fixed by introducing a `safeAdvance()` guard (`advanceLocked` flag) so only the first caller proceeds.
-
-- **[Critical] Delete button always shown for own user account** â€” In the Users table, the self-check compared `u.username` against the un-evaluated string literal `'${state.user?.username}'` rather than the actual runtime value. As a result, admins could render a delete button for their own account. Fixed by comparing numeric user IDs: `u.id === state.user?.id`.
-
-- **[Medium] Playlist `updated_at` timestamp never updated** â€” `api_update_playlist()` did not explicitly set `updated_at`. The SQLAlchemy `onupdate` hook is unreliable with SQLite and silently skipped. Fixed by adding `pl.updated_at = datetime.utcnow()` explicitly, consistent with how `api_update_asset()` already handled it.
-
-- **[Medium] XSS injection risk in User Management table** â€” User data (including email and username) was passed directly into `onclick` attributes via `JSON.stringify()`. A username or email containing `'`, `"`, or `</script>` could break out of the HTML attribute context. Fixed by storing users in `state.usersById` (keyed by numeric ID) and passing only the safe integer ID into `onclick`. The `esc()` helper now also escapes single quotes (`'` â†’ `&#39;`).
-
-- **[Minor] Unused imports in `app.py`** â€” Removed `hashlib`, `timedelta`, `flash`, `abort`, and `send_from_directory`, none of which were referenced anywhere in the application.
-
-- **[Minor] Pause/resume timer drift in player** â€” After pausing and resuming multiple times, `remaining` was calculated by subtracting elapsed time from the original `progressStart`, causing drift and negative values that made the timer fire instantly on resume. Replaced with `remainingMs` (snapshotted at each pause) and `progressStart` (reset at each resume) for correct remaining-time tracking across any number of pause cycles.
-
----
 
 ## License
 

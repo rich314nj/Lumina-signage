@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LuminaShow</title>
+<style>
+/* Deliberately self-contained: this page is served straight from disk by
+   Nginx so it still loads when the application is down. No fonts, no
+   scripts, no requests beyond the health poll below. */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  background: #000; color: #e8ecf0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+#wrap {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center; padding: 6vh 6vw;
+}
+#mark {
+  font-size: clamp(40px, 6vw, 80px);
+  color: #e8721c; line-height: 1;
+  margin-bottom: 2vh;
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 0.9; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { #mark { animation: none; } }
+h1 {
+  font-size: clamp(22px, 3.4vw, 44px);
+  font-weight: 700; letter-spacing: -0.01em;
+  margin-bottom: 1.2vh;
+}
+p {
+  font-size: clamp(14px, 1.7vw, 22px);
+  color: #8899aa; line-height: 1.4;
+  max-width: 40ch;
+}
+#hint {
+  margin-top: 4vh;
+  font-size: clamp(12px, 1.3vw, 17px);
+  color: #55626f;
+  font-family: ui-monospace, Consolas, monospace;
+  max-width: 52ch;
+  opacity: 0; transition: opacity 0.6s;
+}
+#hint.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="mark">&#9672;</div>
+  <h1 id="title">Starting LuminaShow</h1>
+  <p id="sub">Waiting for the player service&hellip;</p>
+  <div id="hint"></div>
+</div>
+
+<script>
+// Bootstrap page for the kiosk display (FIX #29).
+//
+// The browser is pointed here rather than straight at /player. Nginx serves
+// this file from disk, so it loads even while the application is still
+// starting or has failed — which means the browser is never left sitting on
+// an unrecoverable error page. Once the app answers, we hand over to the
+// player. If the app dies later, the player keeps showing its last playlist.
+var POLL_MS = 2000;
+var attempts = 0;
+
+function showHint(text) {
+  var hint = document.getElementById('hint');
+  hint.textContent = text;
+  hint.className = 'show';
+}
+
+function poll() {
+  attempts++;
+
+  // Any HTTP response means the application is answering; the player itself
+  // handles the "no content scheduled" case.
+  fetch('/api/current-playlist', { cache: 'no-store' })
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      window.location.replace('/player');
+    })
+    .catch(function () {
+      if (attempts === 8) {
+        document.getElementById('sub').textContent =
+          'This is taking longer than usual. Still trying…';
+      }
+      if (attempts === 30) {
+        showHint('If this persists, check the service with:  systemctl status lumina');
+      }
+      setTimeout(poll, POLL_MS);
+    });
+}
+
+poll();
+</script>
+</body>
+</html>

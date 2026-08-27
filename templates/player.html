@@ -322,23 +322,68 @@ function extractVimeoId(url) {
   return m ? m[1] : null;
 }
 
+// Identity of the content currently on screen. The poll below runs often, so
+// playback must only restart when this actually changes — see FIX #13.
+let playlistSignature = null;
+
+function signatureOf(pl) {
+  if (!pl || !pl.items) return null;
+  return JSON.stringify([
+    pl.id,
+    pl.loop,
+    pl.items.map(i => [
+      i.asset && i.asset.id,
+      i.asset && i.asset.uri,
+      i.asset && i.asset.duration,
+      i.duration_override
+    ])
+  ]);
+}
+
 async function loadPlaylist() {
   const urlParams = new URLSearchParams(window.location.search);
   const playlistId = urlParams.get('playlist');
   const url = playlistId ? `/api/playlists/${playlistId}` : '/api/current-playlist';
+
+  let incoming;
   try {
-    const res = await fetch(url);
-    playlist = await res.json();
-    if (playlist && playlist.items && playlist.items.length > 0) {
-      items = playlist.items.filter(i => i.asset);
-      currentIdx = 0;
-      showItem(currentIdx);
-    } else {
-      showEmpty();
-    }
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    incoming = await res.json();
   } catch (e) {
-    showEmpty();
+    // FIX #14: a transient failure (service restart, nginx reload, network
+    // blip) must not blank a working screen. Keep playing and try again on
+    // the next poll; only fall back to the setup screen if there is nothing
+    // on screen to keep.
+    if (!items.length) showEmpty();
+    return;
   }
+
+  const hasContent = incoming && incoming.items && incoming.items.length > 0;
+  if (!hasContent) {
+    playlistSignature = null;
+    playlist = null;
+    items = [];
+    showEmpty();
+    return;
+  }
+
+  const signature = signatureOf(incoming);
+
+  // FIX #13: previously this reset currentIdx to 0 and restarted playback on
+  // every poll, so any playlist longer than the poll interval never reached
+  // its later items. Restart only when the content genuinely changed.
+  if (signature === playlistSignature && items.length) {
+    playlist = incoming;
+    items = incoming.items.filter(i => i.asset);
+    return;
+  }
+
+  playlistSignature = signature;
+  playlist = incoming;
+  items = incoming.items.filter(i => i.asset);
+  currentIdx = 0;
+  showItem(currentIdx);
 }
 
 // ── Setup screen ───────────────────────────────────────────────────────────────
@@ -417,8 +462,9 @@ function showEmpty() {
       if (emptyEl.style.display === 'none') {
         clearInterval(setupPoll); setupPoll = null; return;
       }
+      // The main poll below already calls loadPlaylist(); this only needs to
+      // refresh what the setup screen displays (address, hotspot state).
       renderSetupScreen();
-      loadPlaylist();
     }, 15000);
   }
 }
@@ -695,8 +741,10 @@ document.addEventListener('keydown', e => {
   if (e.key === 'f' || e.key === 'F') toggleFullscreen();
 });
 
-// Auto-reload playlist every 5 min to pick up schedule changes
-setInterval(loadPlaylist, 5 * 60 * 1000);
+// FIX #30: poll often so content edits reach the screen in seconds rather
+// than minutes. Safe to do frequently now that loadPlaylist() only restarts
+// playback when the content has actually changed.
+setInterval(loadPlaylist, 15 * 1000);
 
 loadPlaylist();
 </script>

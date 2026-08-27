@@ -7,12 +7,17 @@
 # one place.
 set -u
 
-PLAYER_URL="${LUMINA_PLAYER_URL:-http://localhost/player}"
+# Point the browser at the bootstrap page rather than /player directly
+# (FIX #29). Nginx serves it from disk, so it loads even when the application
+# is still starting or has failed; it then hands over to the player once the
+# app answers. Chromium will not recover on its own from an error page, so it
+# must never be given the chance to land on one.
+BOOTSTRAP_URL="${LUMINA_BOOTSTRAP_URL:-http://localhost/static/kiosk.html}"
 
-# Wait for the server before starting the browser: without this a boot race
-# leaves a "connection refused" page on the screen indefinitely.
+# Wait for Nginx to serve the bootstrap page before starting the browser.
+# This only needs the web server, not the application, so it clears quickly.
 for _ in $(seq 1 150); do
-  if curl -sf -o /dev/null --max-time 3 "$PLAYER_URL"; then
+  if curl -sf -o /dev/null --max-time 3 "$BOOTSTRAP_URL"; then
     break
   fi
   sleep 2
@@ -48,4 +53,4 @@ exec "$BROWSER" \
   --autoplay-policy=no-user-gesture-required \
   --user-data-dir="$PROFILE_DIR" \
   "${PLATFORM_ARGS[@]}" \
-  "$PLAYER_URL"
+  "$BOOTSTRAP_URL"
