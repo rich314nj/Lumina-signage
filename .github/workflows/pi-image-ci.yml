@@ -71,7 +71,9 @@ jobs:
   build-image:
     name: Build Raspberry Pi Image
     needs: smoke
-    runs-on: ubuntu-latest
+    # Native arm64 runner: no qemu emulation (the old multiarch qemu binfmt
+    # segfaulted configuring arm64 packages in the chroot) and much faster.
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 330
     if: >
       github.event_name != 'pull_request' &&
@@ -94,7 +96,6 @@ jobs:
             dosfstools e2fsprogs libarchive-tools libcap2-bin grep rsync \
             xz-utils file git curl bc gpg pigz xxd arch-test binfmt-support \
             p7zip-full
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
 
       - name: Build image with pi-gen
         env:
