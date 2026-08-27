@@ -36,6 +36,7 @@
 - **Schedule engine** â€” set playlists to play on specific days and time ranges
 - **Full-screen player** â€” smooth fade transitions, keyboard shortcuts, auto-advance
 - **Role-based access control** â€” Admin, Editor, and Viewer roles
+- **Network management** â€” change hostname, join WiFi, and set DHCP/static IP from the admin UI (Admin only, requires NetworkManager)
 - **Nginx reverse proxy** â€” production-ready setup out of the box
 - **Systemd service** â€” auto-starts on boot, auto-restarts on failure
 - **REST API** â€” full API for automation and custom integrations
@@ -422,6 +423,18 @@ curl -b cookies.txt -X PUT http://localhost/api/playlists/<id> \
 | GET | `/api/stats` | Dashboard statistics |
 | GET | `/api/me` | Current user info |
 | GET | `/api/current-playlist` | Currently scheduled playlist |
+
+### Network (Admin only, requires NetworkManager)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/network/status` | Hostname + per-interface IP/gateway/DNS/method |
+| POST | `/api/network/wifi/scan` | Rescan and list nearby WiFi networks |
+| POST | `/api/network/wifi/connect` | Join a WiFi network (`{"ssid","password"}`) |
+| POST | `/api/network/ip` | Set DHCP or static IPv4 (`{"device","method","address","gateway","dns"}`) |
+| POST | `/api/network/hostname` | Change device hostname (`{"hostname"}`) |
+
+> Privileged changes are executed through `/usr/local/sbin/lumina-net`, a validated helper the installer provisions with a sudoers entry scoped to exactly that script. On systems without `nmcli` these endpoints return `503` and the Network page shows a notice.
 
 ---
 

@@ -207,6 +207,18 @@ else
   error "Cannot find application files. Run install.sh from the lumina-signage directory."
 fi
 
+# Network management helper: the app's Network page calls this via sudo.
+# The sudoers grant is limited to exactly this script.
+if [ -f "$INSTALL_DIR/scripts/lumina-net" ]; then
+  install -m 0755 "$INSTALL_DIR/scripts/lumina-net" /usr/local/sbin/lumina-net
+  sed -i 's/\r$//' /usr/local/sbin/lumina-net
+  cat > /etc/sudoers.d/lumina-net << SUDOERS
+$APP_USER ALL=(root) NOPASSWD: /usr/local/sbin/lumina-net
+SUDOERS
+  chmod 0440 /etc/sudoers.d/lumina-net
+  ok "Network management helper installed"
+fi
+
 # Create Python virtual environment
 info "Creating Python virtual environmentâ€¦"
 python3 -m venv "$INSTALL_DIR/venv"

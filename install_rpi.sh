@@ -194,6 +194,17 @@ rm -f /etc/nginx/sites-enabled/default
 chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
 chown -R "$APP_USER:$APP_USER" /var/log/lumina
 
+# Network management helper: the app's Network page calls this via sudo.
+# The sudoers grant is limited to exactly this script.
+if [[ -f "$INSTALL_DIR/scripts/lumina-net" ]]; then
+  install -m 0755 "$INSTALL_DIR/scripts/lumina-net" /usr/local/sbin/lumina-net
+  sed -i 's/\r$//' /usr/local/sbin/lumina-net
+  cat > /etc/sudoers.d/lumina-net <<EOF
+$APP_USER ALL=(root) NOPASSWD: /usr/local/sbin/lumina-net
+EOF
+  chmod 0440 /etc/sudoers.d/lumina-net
+fi
+
 # ImageMagick on Debian often blocks PDF by default.
 for policy_file in /etc/ImageMagick-*/policy.xml; do
   [[ -f "$policy_file" ]] || continue

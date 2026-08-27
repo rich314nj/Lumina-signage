@@ -8,7 +8,10 @@ import os
 import re
 import json
 import uuid
+import shutil
+import socket
 import secrets
+import ipaddress
 import subprocess
 import mimetypes
 from datetime import datetime
@@ -941,6 +944,238 @@ def api_stats():
         "total_users": total_users,
         "disk_used_bytes": total_size,
     })
+
+
+# ── API: Network (Admin) ──────────────────────────────────────────────────────
+# All privileged changes go through /usr/local/sbin/lumina-net via sudo -n;
+# the sudoers entry provisioned by the installers allows exactly that script.
+
+NET_HELPER = "/usr/local/sbin/lumina-net"
+HOSTNAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+DEVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,14}$")
+
+
+def network_supported():
+    return os.name == "posix" and shutil.which("nmcli") is not None
+
+
+def run_cmd(args, timeout=30, input_text=None):
+    try:
+        result = subprocess.run(
+            args, capture_output=True, text=True, timeout=timeout, input=input_text
+        )
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+    except subprocess.TimeoutExpired:
+        return -1, "", "Command timed out"
+    except FileNotFoundError:
+        return -1, "", f"{args[0]} not found"
+
+
+def run_net_helper(args, timeout=60, input_text=None):
+    if os.geteuid() == 0:
+        return run_cmd([NET_HELPER] + args, timeout, input_text)
+    return run_cmd(["sudo", "-n", NET_HELPER] + args, timeout, input_text)
+
+
+def split_terse(line):
+    """Split nmcli -t output on ':' honoring backslash escapes (SSIDs, IPv6)."""
+    parts, cur, escaped = [], "", False
+    for ch in line:
+        if escaped:
+            cur += ch
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == ":":
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    return parts
+
+
+@app.route("/api/network/status")
+@login_required
+@role_required("admin")
+def api_network_status():
+    hostname = socket.gethostname()
+    if not network_supported():
+        return jsonify({
+            "available": False, "hostname": hostname, "devices": [],
+            "reason": "NetworkManager (nmcli) is not available on this system",
+        })
+    rc, out, err = run_cmd(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"])
+    if rc != 0:
+        return jsonify({
+            "available": False, "hostname": hostname, "devices": [],
+            "reason": err or "nmcli failed",
+        })
+    devices = []
+    for line in out.splitlines():
+        f = split_terse(line)
+        if len(f) < 4 or f[1] not in ("ethernet", "wifi"):
+            continue
+        dev = {
+            "device": f[0], "type": f[1], "state": f[2],
+            "connection": f[3] or None,
+            "ip": None, "gateway": None, "dns": [], "method": None,
+            "ssid": None, "signal": None,
+        }
+        rc2, out2, _ = run_cmd(["nmcli", "-t", "-f", "IP4.ADDRESS,IP4.GATEWAY,IP4.DNS", "device", "show", f[0]])
+        if rc2 == 0:
+            for l2 in out2.splitlines():
+                key, _, val = l2.partition(":")
+                if key.startswith("IP4.ADDRESS") and not dev["ip"]:
+                    dev["ip"] = val
+                elif key == "IP4.GATEWAY" and val:
+                    dev["gateway"] = val
+                elif key.startswith("IP4.DNS") and val:
+                    dev["dns"].append(val)
+        if dev["connection"]:
+            rc3, out3, _ = run_cmd(["nmcli", "-t", "-f", "ipv4.method", "connection", "show", dev["connection"]])
+            if rc3 == 0 and ":" in out3:
+                dev["method"] = out3.split(":", 1)[1].strip()
+        devices.append(dev)
+    # SSID + signal for the connected WiFi network
+    rc4, out4, _ = run_cmd(["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL", "device", "wifi", "list"])
+    if rc4 == 0:
+        for line in out4.splitlines():
+            f = split_terse(line)
+            if len(f) >= 3 and f[0] == "*":
+                for dev in devices:
+                    if dev["type"] == "wifi":
+                        dev["ssid"] = f[1]
+                        dev["signal"] = f[2]
+                break
+    return jsonify({"available": True, "hostname": hostname, "devices": devices})
+
+
+@app.route("/api/network/wifi/scan", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_network_wifi_scan():
+    if not network_supported():
+        return jsonify({"error": "Network management not available on this system"}), 503
+    # Rescan needs privileges; ignore failures (rate-limited scans still return
+    # the cached list below).
+    run_net_helper(["wifi-rescan"], timeout=30)
+    rc, out, err = run_cmd(["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list"])
+    if rc != 0:
+        return jsonify({"error": err or "WiFi scan failed"}), 502
+    networks = {}
+    for line in out.splitlines():
+        f = split_terse(line)
+        if len(f) < 4 or not f[1]:
+            continue  # skip hidden SSIDs
+        ssid = f[1]
+        try:
+            signal = int(f[2])
+        except ValueError:
+            signal = 0
+        entry = {
+            "ssid": ssid, "signal": signal,
+            "security": f[3] if f[3] not in ("", "--") else "open",
+            "in_use": f[0] == "*",
+        }
+        # Dedupe by SSID keeping the strongest signal (or the in-use entry).
+        prev = networks.get(ssid)
+        if not prev or entry["in_use"] or (not prev["in_use"] and signal > prev["signal"]):
+            networks[ssid] = entry
+    ordered = sorted(networks.values(), key=lambda n: (-n["in_use"], -n["signal"]))
+    return jsonify(ordered)
+
+
+@app.route("/api/network/wifi/connect", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_network_wifi_connect():
+    if not network_supported():
+        return jsonify({"error": "Network management not available on this system"}), 503
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+    ssid = data.get("ssid", "")
+    password = data.get("password", "") or ""
+    if (not isinstance(ssid, str) or not ssid or len(ssid.encode()) > 32
+            or ssid.startswith("-") or any(ord(c) < 32 for c in ssid)):
+        return jsonify({"error": "Invalid SSID"}), 400
+    if password and (not isinstance(password, str) or not 8 <= len(password) <= 63
+                     or any(ord(c) < 32 for c in password)):
+        return jsonify({"error": "Passphrase must be 8-63 characters"}), 400
+    # Passphrase travels via stdin so it never appears in the process list.
+    rc, out, err = run_net_helper(["wifi-connect", ssid], timeout=90, input_text=password + "\n")
+    if rc != 0:
+        return jsonify({"error": err or out or "Failed to connect"}), 502
+    return jsonify({"success": True, "message": out or f"Connected to {ssid}"})
+
+
+@app.route("/api/network/ip", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_network_ip():
+    if not network_supported():
+        return jsonify({"error": "Network management not available on this system"}), 503
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+    device = data.get("device", "")
+    method = data.get("method", "")
+    if not isinstance(device, str) or not DEVICE_RE.fullmatch(device):
+        return jsonify({"error": "Invalid device"}), 400
+    if method == "dhcp":
+        rc, out, err = run_net_helper(["ip-dhcp", device], timeout=90)
+    elif method == "static":
+        address = data.get("address", "")
+        gateway = data.get("gateway", "")
+        dns = data.get("dns", [])
+        try:
+            if not isinstance(address, str) or "/" not in address:
+                raise ValueError
+            iface = ipaddress.ip_interface(address)
+            if iface.version != 4:
+                raise ValueError
+        except ValueError:
+            return jsonify({"error": "Address must be IPv4 CIDR, e.g. 192.168.1.50/24"}), 400
+        try:
+            if ipaddress.ip_address(gateway).version != 4:
+                raise ValueError
+        except ValueError:
+            return jsonify({"error": "Invalid gateway address"}), 400
+        if not isinstance(dns, list) or len(dns) > 3:
+            return jsonify({"error": "dns must be a list of up to 3 addresses"}), 400
+        for server in dns:
+            try:
+                if ipaddress.ip_address(server).version != 4:
+                    raise ValueError
+            except (ValueError, TypeError):
+                return jsonify({"error": f"Invalid DNS address: {server}"}), 400
+        rc, out, err = run_net_helper(
+            ["ip-static", device, address, gateway, ",".join(dns)], timeout=90
+        )
+    else:
+        return jsonify({"error": "method must be 'dhcp' or 'static'"}), 400
+    if rc != 0:
+        return jsonify({"error": err or out or "Failed to apply IP configuration"}), 502
+    return jsonify({"success": True, "message": out or "IP configuration applied"})
+
+
+@app.route("/api/network/hostname", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_network_hostname():
+    if not network_supported():
+        return jsonify({"error": "Network management not available on this system"}), 503
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+    hostname = data.get("hostname", "")
+    if not isinstance(hostname, str) or not HOSTNAME_RE.fullmatch(hostname):
+        return jsonify({"error": "Hostname must be 1-63 letters, digits, or hyphens"}), 400
+    rc, out, err = run_net_helper(["hostname", hostname], timeout=30)
+    if rc != 0:
+        return jsonify({"error": err or out or "Failed to set hostname"}), 502
+    return jsonify({"success": True, "hostname": hostname})
 
 
 # ── API: Current Playlist (for player) ────────────────────────────────────────

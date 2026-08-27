@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.5.0] — 2026-08-27
+
+### Added
+
+- **Network management in the admin UI** (#7) — New Admin-only **Network** page:
+  - **Hostname** — view and change the device hostname (updates `/etc/hosts` too; device stays reachable as `http://<hostname>.local`).
+  - **Interfaces** — per-interface status cards (IP, gateway, DNS, DHCP/Static badge, WiFi SSID + signal) with a **Configure IP** dialog to switch between DHCP and static IPv4 (address/prefix, gateway, DNS), including a warning + confirmation since IP changes can drop the admin session.
+  - **WiFi** — scan for nearby networks (signal strength, security), join a network with a passphrase, see the currently connected SSID.
+  - Backend: `/api/network/*` endpoints validate every input (hostname/device regexes, `ipaddress`-parsed CIDR/gateway/DNS, SSID/passphrase length + control-character checks) and delegate privileged changes to a new `scripts/lumina-net` helper invoked via `sudo -n`. The helper re-validates all arguments and reads the WiFi passphrase from stdin so it never appears in the process list. Installers provision `/usr/local/sbin/lumina-net` plus a sudoers entry scoped to exactly that script; the uninstaller removes both.
+  - On systems without NetworkManager (`nmcli`) the page shows a clear "not available" notice and the endpoints return 503.
+
+---
+
 ## [1.4.1] — 2026-08-27
 
 ### Fixed

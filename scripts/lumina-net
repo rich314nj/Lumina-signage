@@ -1,0 +1,83 @@
+#!/bin/bash
+set -euo pipefail
+
+# Privileged network helper for LuminaShow.
+#
+# Installed to /usr/local/sbin/lumina-net by the installers. The 'lumina'
+# service user is granted passwordless sudo for exactly this script (see
+# /etc/sudoers.d/lumina-net), so every argument is re-validated here —
+# never trust the caller, even though app.py validates too.
+#
+# The WiFi passphrase is read from stdin, not argv, so it never appears
+# in the process list.
+
+die() { echo "$1" >&2; exit 1; }
+
+valid_device()   { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,14}$ ]]; }
+valid_hostname() { [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]; }
+valid_ipv4()     { [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; }
+valid_cidr4()    { [[ "$1" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]]; }
+
+active_connection() {
+  local conn
+  conn="$(nmcli -g GENERAL.CONNECTION device show "$1" 2>/dev/null | head -n1)"
+  [[ -n "$conn" && "$conn" != "--" ]] || die "device '$1' has no active connection"
+  printf '%s' "$conn"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  wifi-rescan)
+    exec nmcli device wifi rescan
+    ;;
+
+  wifi-connect)
+    ssid="${1:-}"
+    [[ -n "$ssid" && "${#ssid}" -le 32 && "$ssid" != -* ]] || die "invalid ssid"
+    [[ "$ssid" != *$'\n'* && "$ssid" != *$'\r'* ]] || die "invalid ssid"
+    IFS= read -r psk || psk=""
+    if [[ -n "$psk" ]]; then
+      (( ${#psk} >= 8 && ${#psk} <= 63 )) || die "passphrase must be 8-63 characters"
+      exec nmcli device wifi connect "$ssid" password "$psk"
+    fi
+    exec nmcli device wifi connect "$ssid"
+    ;;
+
+  ip-dhcp)
+    dev="${1:-}"
+    valid_device "$dev" || die "invalid device"
+    conn="$(active_connection "$dev")"
+    nmcli connection modify "$conn" ipv4.method auto ipv4.addresses "" ipv4.gateway "" ipv4.dns ""
+    exec nmcli connection up "$conn"
+    ;;
+
+  ip-static)
+    dev="${1:-}"; addr="${2:-}"; gw="${3:-}"; dns="${4:-}"
+    valid_device "$dev" || die "invalid device"
+    valid_cidr4 "$addr" || die "invalid address (need x.x.x.x/prefix)"
+    valid_ipv4 "$gw" || die "invalid gateway"
+    if [[ -n "$dns" ]]; then
+      [[ "$dns" =~ ^[0-9.]+(,[0-9.]+)*$ ]] || die "invalid dns list"
+    fi
+    conn="$(active_connection "$dev")"
+    nmcli connection modify "$conn" ipv4.method manual ipv4.addresses "$addr" ipv4.gateway "$gw" ipv4.dns "$dns"
+    exec nmcli connection up "$conn"
+    ;;
+
+  hostname)
+    name="${1:-}"
+    valid_hostname "$name" || die "invalid hostname"
+    hostnamectl set-hostname "$name"
+    if grep -qE '^127\.0\.1\.1' /etc/hosts; then
+      sed -i "s/^127\.0\.1\.1.*/127.0.1.1\t${name}/" /etc/hosts
+    else
+      printf '127.0.1.1\t%s\n' "$name" >> /etc/hosts
+    fi
+    ;;
+
+  *)
+    die "usage: lumina-net {wifi-rescan|wifi-connect|ip-dhcp|ip-static|hostname} ..."
+    ;;
+esac

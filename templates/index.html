@@ -217,6 +217,7 @@ select option { background: var(--surface2); }
       <div class="nav-section" id="adminNav" style="display:none">
         <span class="nav-label">Admin</span>
         <div class="nav-item" onclick="navigate('users')"><span class="nav-icon">⊙</span><span>Users</span></div>
+        <div class="nav-item" onclick="navigate('network')"><span class="nav-icon">⇄</span><span>Network</span></div>
       </div>
       <div class="nav-section">
         <span class="nav-label">Display</span>
@@ -283,6 +284,35 @@ select option { background: var(--surface2); }
               <thead><tr><th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
               <tbody id="usersTable"></tbody>
             </table>
+          </div>
+        </div>
+      </div>
+      <div id="page-network" class="page">
+        <div class="page-header">
+          <div><div class="page-title">Network</div><div class="page-subtitle">Hostname, WiFi, and IP configuration for this device</div></div>
+          <div class="header-actions"><button class="btn btn-secondary" onclick="loadNetwork()">↻ Refresh</button></div>
+        </div>
+        <div id="networkUnavailable" class="empty-state" style="display:none">
+          <div class="empty-icon">⇄</div>
+          <div class="empty-title">Network management not available</div>
+          <div class="empty-desc" id="netUnavailReason">This feature requires NetworkManager (nmcli) on the device.</div>
+        </div>
+        <div id="networkContent" style="display:none">
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-header"><span class="card-title">Hostname</span></div>
+            <div style="padding:16px 20px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+              <div class="form-group" style="flex:1;max-width:320px;min-width:200px"><label>Device Hostname</label><input type="text" id="netHostname" maxlength="63"></div>
+              <button class="btn btn-primary" onclick="applyHostname()">Apply</button>
+            </div>
+            <div style="padding:0 20px 14px;font-size:11px;color:var(--text3);font-family:var(--font-mono)">Letters, digits, and hyphens only · device becomes reachable as http://&lt;hostname&gt;.local</div>
+          </div>
+          <div id="netInterfaces"></div>
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">WiFi Networks</span>
+              <button class="btn btn-secondary btn-sm" id="wifiScanBtn" onclick="scanWifi()">⟳ Scan</button>
+            </div>
+            <div id="wifiList" style="padding:16px 20px;font-size:13px;color:var(--text3)">Click Scan to search for nearby networks.</div>
           </div>
         </div>
       </div>
@@ -391,6 +421,47 @@ select option { background: var(--surface2); }
   </div>
 </div>
 
+<!-- WiFi Connect Modal -->
+<div class="modal-overlay" id="wifiModal">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title" id="wifiModalTitle">Connect to WiFi</div><button class="modal-close" onclick="closeModal('wifiModal')">✕</button></div>
+    <div class="form-grid">
+      <div class="form-group"><label>Network</label><input type="text" id="wifiSsid" disabled></div>
+      <div class="form-group" id="wifiPassGroup"><label>Passphrase</label><input type="password" id="wifiPassword" placeholder="8-63 characters" autocomplete="off"></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('wifiModal')">Cancel</button><button class="btn btn-primary" id="wifiConnectBtn" onclick="doWifiConnect()">Connect</button></div>
+  </div>
+</div>
+
+<!-- IP Config Modal -->
+<div class="modal-overlay" id="ipModal">
+  <div class="modal">
+    <div class="modal-header"><div class="modal-title" id="ipModalTitle">Configure IP</div><button class="modal-close" onclick="closeModal('ipModal')">✕</button></div>
+    <input type="hidden" id="ipDevice">
+    <div class="form-grid">
+      <div class="form-group"><label>Method</label>
+        <select id="ipMethod" onchange="toggleIpFields()">
+          <option value="dhcp">DHCP — automatic</option>
+          <option value="static">Static IP — manual</option>
+        </select>
+      </div>
+      <div id="ipStaticFields" style="display:none">
+        <div class="form-grid">
+          <div class="form-row">
+            <div class="form-group"><label>Address / Prefix</label><input type="text" id="ipAddress" placeholder="192.168.1.50/24"></div>
+            <div class="form-group"><label>Gateway</label><input type="text" id="ipGateway" placeholder="192.168.1.1"></div>
+          </div>
+          <div class="form-group"><label>DNS Servers (comma-separated, optional)</label><input type="text" id="ipDns" placeholder="192.168.1.1, 8.8.8.8"></div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--yellow);background:rgba(245,197,66,0.08);border:1px solid rgba(245,197,66,0.2);border-radius:var(--radius);padding:10px 12px">
+        ⚠ Changing the IP of the interface you are connected through will drop this session — reconnect at the new address afterward. A wrong static configuration can make the device unreachable.
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('ipModal')">Cancel</button><button class="btn btn-primary" id="ipApplyBtn" onclick="doApplyIp()">Apply</button></div>
+  </div>
+</div>
+
 <!-- User Modal -->
 <div class="modal-overlay" id="userModal">
   <div class="modal">
@@ -427,6 +498,9 @@ let state = {
   playlistActive: true,
   userActive: true,
   allAssets: [],
+  network: null,
+  wifiNetworks: [],
+  wifiTarget: null,
 };
 
 // ── API ────────────────────────────────────────────────────────────────────────
@@ -473,6 +547,7 @@ async function loadPage(page) {
   else if (page === 'playlists') await loadPlaylists();
   else if (page === 'schedules') await loadSchedules();
   else if (page === 'users') await loadUsers();
+  else if (page === 'network') await loadNetwork();
 }
 
 // ── Theme ──────────────────────────────────────────────────────────────────────
@@ -888,6 +963,194 @@ async function deleteUser(id) {
   if (!confirm('Delete this user?')) return;
   try { await api('DELETE',`/api/users/${id}`); toast('User deleted','success'); await loadUsers(); }
   catch (e) { toast(e.message,'error'); }
+}
+
+// ── Network ────────────────────────────────────────────────────────────────────
+async function loadNetwork() {
+  try {
+    const st = await api('GET', '/api/network/status');
+    state.network = st;
+    const unavail = document.getElementById('networkUnavailable');
+    const content = document.getElementById('networkContent');
+    if (!st.available) {
+      unavail.style.display = '';
+      content.style.display = 'none';
+      if (st.reason) document.getElementById('netUnavailReason').textContent = st.reason;
+      return;
+    }
+    unavail.style.display = 'none';
+    content.style.display = '';
+    document.getElementById('netHostname').value = st.hostname;
+    renderInterfaces(st.devices);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function methodBadge(method) {
+  if (method === 'manual') return '<span class="badge badge-yellow">Static</span>';
+  if (method === 'auto') return '<span class="badge badge-green">DHCP</span>';
+  return '<span class="badge badge-gray">—</span>';
+}
+
+function renderInterfaces(devices) {
+  const c = document.getElementById('netInterfaces');
+  if (!devices.length) {
+    c.innerHTML = '<div class="card" style="margin-bottom:20px"><div style="padding:16px 20px;font-size:13px;color:var(--text3)">No network interfaces found.</div></div>';
+    return;
+  }
+  c.innerHTML = devices.map(d => {
+    const connected = d.state === 'connected';
+    const icon = d.type === 'wifi' ? '📶' : '🖧';
+    const wifiInfo = d.type === 'wifi' && d.ssid ? ` · ${esc(d.ssid)} (${esc(d.signal)}%)` : '';
+    return `<div class="card" style="margin-bottom:20px">
+      <div class="card-header">
+        <span class="card-title">${icon} ${esc(d.device)} <span style="font-weight:400;color:var(--text3);font-size:12px">${esc(d.type)}${wifiInfo}</span></span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="badge ${connected ? 'badge-green' : 'badge-gray'}">${esc(d.state)}</span>
+          ${methodBadge(d.method)}
+          ${connected ? `<button class="btn btn-secondary btn-sm" onclick="openIpModal('${esc(d.device)}')">Configure IP</button>` : ''}
+        </div>
+      </div>
+      <div style="padding:14px 20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;font-family:var(--font-mono);font-size:12px">
+        <div><div style="color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:1px">IP Address</div>${esc(d.ip || '—')}</div>
+        <div><div style="color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:1px">Gateway</div>${esc(d.gateway || '—')}</div>
+        <div><div style="color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:1px">DNS</div>${d.dns.length ? d.dns.map(esc).join(', ') : '—'}</div>
+        <div><div style="color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:1px">Connection</div>${esc(d.connection || '—')}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function applyHostname() {
+  const hostname = document.getElementById('netHostname').value.trim();
+  if (!hostname) { toast('Hostname is required', 'error'); return; }
+  if (!confirm(`Set device hostname to "${hostname}"?`)) return;
+  try {
+    await api('POST', '/api/network/hostname', { hostname });
+    toast(`Hostname set to ${hostname}`, 'success');
+    await loadNetwork();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function signalBars(signal) {
+  const s = parseInt(signal) || 0;
+  if (s >= 75) return '▂▄▆█';
+  if (s >= 50) return '▂▄▆<span style="opacity:0.2">█</span>';
+  if (s >= 25) return '▂▄<span style="opacity:0.2">▆█</span>';
+  return '▂<span style="opacity:0.2">▄▆█</span>';
+}
+
+async function scanWifi() {
+  const btn = document.getElementById('wifiScanBtn');
+  const list = document.getElementById('wifiList');
+  btn.disabled = true;
+  list.innerHTML = '<span style="color:var(--text3)">Scanning…</span>';
+  try {
+    state.wifiNetworks = await api('POST', '/api/network/wifi/scan');
+    renderWifiList();
+  } catch (e) {
+    list.innerHTML = '<span style="color:var(--text3)">Scan failed.</span>';
+    toast(e.message, 'error');
+  }
+  btn.disabled = false;
+}
+
+function renderWifiList() {
+  const list = document.getElementById('wifiList');
+  const nets = state.wifiNetworks || [];
+  if (!nets.length) {
+    list.innerHTML = '<span style="color:var(--text3)">No networks found.</span>';
+    return;
+  }
+  list.style.padding = '0';
+  list.innerHTML = nets.map((n, idx) => `
+    <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--border)">
+      <span style="font-family:var(--font-mono);font-size:14px;color:var(--accent)">${signalBars(n.signal)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(n.ssid)}</div>
+        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">${esc(n.security)} · ${n.signal}%</div>
+      </div>
+      ${n.in_use
+        ? '<span class="badge badge-green">Connected</span>'
+        : `<button class="btn btn-secondary btn-sm" onclick="openWifiConnect(${idx})">Connect</button>`}
+    </div>`).join('');
+}
+
+// Pass only the index into onclick — never the SSID string itself (FIX #6 pattern).
+function openWifiConnect(idx) {
+  const n = (state.wifiNetworks || [])[idx];
+  if (!n) return;
+  state.wifiTarget = n;
+  document.getElementById('wifiSsid').value = n.ssid;
+  document.getElementById('wifiPassword').value = '';
+  document.getElementById('wifiPassGroup').style.display = n.security === 'open' ? 'none' : '';
+  openModal('wifiModal');
+}
+
+async function doWifiConnect() {
+  const n = state.wifiTarget;
+  if (!n) return;
+  const password = document.getElementById('wifiPassword').value;
+  if (n.security !== 'open' && (password.length < 8 || password.length > 63)) {
+    toast('Passphrase must be 8-63 characters', 'error');
+    return;
+  }
+  const btn = document.getElementById('wifiConnectBtn');
+  btn.disabled = true;
+  btn.textContent = 'Connecting…';
+  try {
+    await api('POST', '/api/network/wifi/connect', { ssid: n.ssid, password: n.security === 'open' ? '' : password });
+    toast(`Connected to ${n.ssid}`, 'success');
+    closeModal('wifiModal');
+    await loadNetwork();
+  } catch (e) { toast(e.message, 'error'); }
+  btn.disabled = false;
+  btn.textContent = 'Connect';
+}
+
+function openIpModal(device) {
+  const d = (state.network?.devices || []).find(x => x.device === device);
+  if (!d) return;
+  document.getElementById('ipDevice').value = d.device;
+  document.getElementById('ipModalTitle').textContent = `Configure IP — ${d.device}`;
+  document.getElementById('ipMethod').value = d.method === 'manual' ? 'static' : 'dhcp';
+  document.getElementById('ipAddress').value = d.ip || '';
+  document.getElementById('ipGateway').value = d.gateway || '';
+  document.getElementById('ipDns').value = (d.dns || []).join(', ');
+  toggleIpFields();
+  openModal('ipModal');
+}
+
+function toggleIpFields() {
+  const isStatic = document.getElementById('ipMethod').value === 'static';
+  document.getElementById('ipStaticFields').style.display = isStatic ? '' : 'none';
+}
+
+async function doApplyIp() {
+  const device = document.getElementById('ipDevice').value;
+  const method = document.getElementById('ipMethod').value;
+  const body = { device, method };
+  if (method === 'static') {
+    body.address = document.getElementById('ipAddress').value.trim();
+    body.gateway = document.getElementById('ipGateway').value.trim();
+    body.dns = document.getElementById('ipDns').value.split(',').map(s => s.trim()).filter(Boolean);
+    if (!body.address || !body.gateway) { toast('Address and gateway are required for static IP', 'error'); return; }
+  }
+  if (!confirm(`Apply ${method === 'static' ? 'static IP ' + body.address : 'DHCP'} to ${device}?\n\nIf this changes the address you are connected through, this session will drop — reconnect at the new address.`)) return;
+  const btn = document.getElementById('ipApplyBtn');
+  btn.disabled = true;
+  btn.textContent = 'Applying…';
+  try {
+    await api('POST', '/api/network/ip', body);
+    toast('IP configuration applied', 'success');
+    closeModal('ipModal');
+    await loadNetwork();
+  } catch (e) {
+    // A dropped connection here usually means the change DID apply and the
+    // device moved to its new address.
+    toast(e.message === 'Failed to fetch' ? 'Connection dropped — the device may now be at its new address' : e.message, 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = 'Apply';
 }
 
 // ── Toggles ────────────────────────────────────────────────────────────────────
