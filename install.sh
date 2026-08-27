@@ -216,6 +216,31 @@ SUDOERS
   ok "Network management helper installed"
 fi
 
+# Device power control, invoked from the admin UI through its own scoped grant.
+if [ -f "$INSTALL_DIR/scripts/lumina-power" ]; then
+  install -m 0755 "$INSTALL_DIR/scripts/lumina-power" /usr/local/sbin/lumina-power
+  sed -i 's/\r$//' /usr/local/sbin/lumina-power
+  cat > /etc/sudoers.d/lumina-power << SUDOERS
+$APP_USER ALL=(root) NOPASSWD: /usr/local/sbin/lumina-power
+SUDOERS
+  chmod 0440 /etc/sudoers.d/lumina-power
+  ok "Power control helper installed"
+fi
+
+# Vendor PDF.js so PDF assets render without internet at playback time.
+PDFJS_DIR="$INSTALL_DIR/static/vendor/pdfjs"
+mkdir -p "$PDFJS_DIR"
+for pdfjs_file in pdf.min.js pdf.worker.min.js; do
+  [ -s "$PDFJS_DIR/$pdfjs_file" ] && continue
+  curl -fsSL --max-time 60 -o "$PDFJS_DIR/$pdfjs_file" \
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/${pdfjs_file}" || true
+done
+if [ -s "$PDFJS_DIR/pdf.min.js" ]; then
+  ok "PDF.js vendored locally"
+else
+  warn "Could not download PDF.js â€” PDF assets will need internet at playback"
+fi
+
 # Create Python virtual environment
 info "Creating Python virtual environmentâ€¦"
 python3 -m venv "$INSTALL_DIR/venv"

@@ -4,7 +4,7 @@ Self-hosted digital signage for Raspberry Pi 4/5. Positioned as a direct
 replacement for Anthias/Screenly OSE, with the differentiator being **setup and
 network management that a non-technical person can do without a keyboard**.
 
-Repo: `rich314nj/Lumina-signage` · Current version: **1.8.0**
+Repo: `rich314nj/Lumina-signage` · Current version: **1.9.0**
 
 ---
 
@@ -117,12 +117,13 @@ Trust before features: the product's problem is reliability, not capability.
 - ~~#27 clicking the drop zone opened the picker but never uploaded~~
 - ~~#31 thumbnails in the Add-from-Library picker~~
 
-### Tier 2 — Make failures survivable ← **next** (deferred past Tier 3)
-- #32 reboot / shutdown / restart-display controls — the **System** page added
-  in 1.8.0 is the obvious home for these
-- #10 health reporting, especially a player heartbeat
-- #15 vendor PDF.js locally (PDFs currently need internet)
-- #28 remainder — Network page should explain a blocked WiFi radio
+### Tier 2 — Make failures survivable ✅ done in 1.9.0
+- ~~#32 reboot / shutdown / restart-display controls~~ — on the System page
+- ~~#10 health reporting + player heartbeat~~
+- ~~#15 vendor PDF.js locally~~ — downloaded by the installers into
+  `static/vendor/pdfjs/` (gitignored), player falls back to the CDN if absent
+- ~~#28 remainder~~ — Network page explains a blocked radio and offers a
+  country field
 
 ### Tier 3 — Lock it in, then make it shippable ✅ done in 1.8.0
 - ~~#22 test suite~~ — 106 tests in `tests/`, CI on 3.11 and 3.12

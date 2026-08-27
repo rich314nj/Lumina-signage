@@ -6,7 +6,7 @@ Similar to Anthias/Screenly
 
 # Single source of truth for the version. Templates read it via the
 # app_version context processor; do not hardcode it in the UI.
-__version__ = "1.8.0"
+__version__ = "1.9.0"
 
 import os
 import re
@@ -1009,6 +1009,154 @@ def split_terse(line):
     return parts
 
 
+# ── API: Health and device control (Admin) ────────────────────────────────────
+
+POWER_HELPER = "/usr/local/sbin/lumina-power"
+POWER_ACTIONS = ("restart-display", "reboot", "shutdown")
+WATCHED_UNITS = ("lumina", "nginx", "lumina-kiosk", "lumina-netwatch")
+
+# Last report from the kiosk player. Held in memory deliberately: it describes
+# the current moment, and a restart should forget it rather than report stale
+# data as current. The player re-reports within seconds.
+_player_heartbeat = {}
+HEARTBEAT_STALE_SECONDS = 90
+
+
+@app.route("/api/player/heartbeat", methods=["POST"])
+def api_player_heartbeat():
+    """Called by the kiosk player. Unauthenticated: the browser has no session.
+
+    A healthy service does not mean a working screen — the player can be dead
+    while everything else looks fine. This is what makes that visible (#10).
+    """
+    data = get_json_dict() or {}
+    item = data.get("item")
+    playlist = data.get("playlist")
+    _player_heartbeat["at"] = datetime.utcnow()
+    _player_heartbeat["item"] = str(item)[:200] if item else None
+    _player_heartbeat["playlist"] = str(playlist)[:200] if playlist else None
+    return jsonify({"ok": True})
+
+
+def service_states():
+    if not shutil.which("systemctl"):
+        return {}
+    states = {}
+    for unit in WATCHED_UNITS:
+        rc, out, _ = run_cmd(["systemctl", "is-active", f"{unit}.service"], timeout=5)
+        # is-active exits non-zero for inactive units, which is not an error.
+        states[unit] = out or ("unknown" if rc < 0 else "inactive")
+    return states
+
+
+def read_first_line(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.readline().strip()
+    except OSError:
+        return None
+
+
+def cpu_temperature_c():
+    raw = read_first_line("/sys/class/thermal/thermal_zone0/temp")
+    try:
+        return round(int(raw) / 1000.0, 1)
+    except (TypeError, ValueError):
+        return None
+
+
+def power_warnings():
+    """Undervoltage and throttling — a very common cause of Pi flakiness."""
+    if not shutil.which("vcgencmd"):
+        return None
+    rc, out, _ = run_cmd(["vcgencmd", "get_throttled"], timeout=5)
+    if rc != 0 or "=" not in out:
+        return None
+    try:
+        bits = int(out.split("=", 1)[1].strip(), 0)
+    except ValueError:
+        return None
+    return {
+        "raw": hex(bits),
+        "undervoltage_now": bool(bits & 0x1),
+        "throttled_now": bool(bits & 0x4),
+        "undervoltage_since_boot": bool(bits & 0x10000),
+        "throttled_since_boot": bool(bits & 0x40000),
+    }
+
+
+@app.route("/api/health")
+@login_required
+@role_required("admin")
+def api_health():
+    uploads_usage = shutil.disk_usage(str(UPLOAD_FOLDER))
+    db_path = BASE_DIR / "lumina.db"
+
+    heartbeat = None
+    if _player_heartbeat.get("at"):
+        age = (datetime.utcnow() - _player_heartbeat["at"]).total_seconds()
+        heartbeat = {
+            "seconds_ago": int(age),
+            "stale": age > HEARTBEAT_STALE_SECONDS,
+            "item": _player_heartbeat.get("item"),
+            "playlist": _player_heartbeat.get("playlist"),
+        }
+
+    uptime_raw = read_first_line("/proc/uptime")
+    try:
+        uptime_seconds = int(float(uptime_raw.split()[0]))
+    except (AttributeError, ValueError, IndexError):
+        uptime_seconds = None
+
+    return jsonify({
+        "version": __version__,
+        "hostname": socket.gethostname(),
+        "uptime_seconds": uptime_seconds,
+        "services": service_states(),
+        "player": heartbeat,
+        "disk": {
+            "total_bytes": uploads_usage.total,
+            "free_bytes": uploads_usage.free,
+            "percent_used": round(
+                (uploads_usage.total - uploads_usage.free) / uploads_usage.total * 100, 1
+            ) if uploads_usage.total else 0,
+            "database_bytes": db_path.stat().st_size if db_path.exists() else 0,
+        },
+        "cpu_temp_c": cpu_temperature_c(),
+        "power": power_warnings(),
+    })
+
+
+@app.route("/api/system/power", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_system_power():
+    if not os.path.exists(POWER_HELPER):
+        return jsonify({"error": "Power control is not available on this system"}), 503
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+    action = data.get("action")
+    if action not in POWER_ACTIONS:
+        return jsonify({
+            "error": f"action must be one of: {', '.join(POWER_ACTIONS)}"
+        }), 400
+
+    if os.geteuid() == 0:
+        rc, out, err = run_cmd([POWER_HELPER, action], timeout=20)
+    else:
+        rc, out, err = run_cmd(["sudo", "-n", POWER_HELPER, action], timeout=20)
+    if rc != 0:
+        return jsonify({"error": err or out or "Command failed"}), 502
+
+    messages = {
+        "restart-display": "Restarting the display.",
+        "reboot": "Rebooting. The device will be back in about a minute.",
+        "shutdown": "Shutting down. Power must be cycled to start it again.",
+    }
+    return jsonify({"success": True, "message": messages[action]})
+
+
 # ── API: Updates (Admin) ──────────────────────────────────────────────────────
 
 UPDATE_HELPER = "/usr/local/sbin/lumina-update"
@@ -1106,6 +1254,20 @@ def local_ipv4_addresses():
         except OSError:
             pass
     return addrs
+
+
+def wifi_radio_blocked():
+    """True when a wireless device exists but the radio is rfkill-blocked.
+
+    Raspberry Pi OS blocks the radio until a regulatory country is set, which
+    presents as WiFi simply not existing — with nothing explaining why (#28).
+    """
+    if not shutil.which("rfkill"):
+        return False
+    rc, out, _ = run_cmd(["rfkill", "list", "wifi"], timeout=10)
+    if rc != 0 or not out.strip():
+        return False
+    return "blocked: yes" in out.lower()
 
 
 def wired_link_present():
@@ -1213,7 +1375,34 @@ def api_network_status():
                         dev["ssid"] = f[1]
                         dev["signal"] = f[2]
                 break
-    return jsonify({"available": True, "hostname": hostname, "devices": devices})
+
+    has_wifi_device = any(d["type"] == "wifi" for d in devices)
+    return jsonify({
+        "available": True,
+        "hostname": hostname,
+        "devices": devices,
+        "has_wifi_device": has_wifi_device,
+        "wifi_blocked": wifi_radio_blocked(),
+    })
+
+
+@app.route("/api/network/wifi/country", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_network_wifi_country():
+    """Set the wireless regulatory country, which unblocks the radio."""
+    if not network_supported():
+        return jsonify({"error": "Network management not available on this system"}), 503
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+    country = data.get("country", "")
+    if not isinstance(country, str) or not re.fullmatch(r"[A-Za-z]{2}", country):
+        return jsonify({"error": "Country must be a two-letter code, e.g. US"}), 400
+    rc, out, err = run_net_helper(["wifi-country", country.upper()], timeout=45)
+    if rc != 0:
+        return jsonify({"error": err or out or "Could not set the country"}), 502
+    return jsonify({"success": True, "country": country.upper()})
 
 
 @app.route("/api/network/wifi/scan", methods=["POST"])

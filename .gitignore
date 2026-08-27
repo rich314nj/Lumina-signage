@@ -8,3 +8,5 @@ lumina.db
 
 .pytest_cache/
 tests/__pycache__/
+
+static/vendor/

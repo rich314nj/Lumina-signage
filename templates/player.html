@@ -4,7 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lumina Player</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- Vendored by the installer so PDFs render with no internet (#15). If the
+     download was unavailable at install time, loadPdf() falls back to the CDN. -->
+<script src="/static/vendor/pdfjs/pdf.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body {
@@ -451,9 +453,23 @@ async function renderSetupScreen() {
   }
 }
 
+// Tells the server the display is alive and what it is showing (#10). A
+// healthy service does not mean a working screen, and this is what makes the
+// difference visible. Never allowed to interfere with playback.
+function sendHeartbeat(item, playlistName) {
+  try {
+    fetch('/api/player/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: item || null, playlist: playlistName || null })
+    }).catch(() => {});
+  } catch (e) { /* ignore */ }
+}
+
 function showEmpty() {
   hideAll();
   emptyEl.style.display = 'block';
+  sendHeartbeat(null, null);
   renderSetupScreen();
   // Poll faster than the normal schedule check so the screen picks up its
   // first playlist (or a new IP) promptly during setup.
@@ -507,6 +523,7 @@ function showItem(idx) {
     hideAll();
     nameEl.textContent = asset.name;
     counterEl.textContent = `${idx + 1} / ${items.length}`;
+    sendHeartbeat(asset.name, playlist && playlist.name);
 
     switch (asset.asset_type) {
       case 'image':
@@ -594,10 +611,37 @@ function advance() {
 }
 
 // ── PDF page-by-page renderer ──────────────────────────────────────────────────
+const PDFJS_LOCAL = '/static/vendor/pdfjs/';
+const PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+let pdfLibLoading = null;
+
+// Returns the base URL the library was loaded from, so the worker is fetched
+// from the same place. Prefers the local copy; only reaches for the network
+// when the installer could not vendor it.
+function ensurePdfLib() {
+  if (window.pdfjsLib) return Promise.resolve(PDFJS_LOCAL);
+  if (!pdfLibLoading) {
+    pdfLibLoading = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = PDFJS_CDN + 'pdf.min.js';
+      s.onload = () => resolve(PDFJS_CDN);
+      s.onerror = () => reject(new Error('PDF.js unavailable locally and offline'));
+      document.head.appendChild(s);
+    });
+  }
+  return pdfLibLoading;
+}
+
 async function loadPdf(uri, totalDurationMs) {
-  // Configure PDF.js worker (uses CDN-hosted worker to avoid CORS issues)
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  try {
+    const base = await ensurePdfLib();
+    pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.js';
+  } catch (e) {
+    console.error('PDF renderer unavailable:', e);
+    metaEl.textContent = 'PDF · renderer unavailable — skipping';
+    safeAdvance();
+    return;
+  }
   try {
     pdfDoc = await pdfjsLib.getDocument(uri).promise;
     pdfTotalPages = pdfDoc.numPages;

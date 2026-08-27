@@ -442,12 +442,15 @@ curl -b cookies.txt -X PUT http://localhost/api/playlists/<id> \
 | GET | `/api/me` | Current user info |
 | GET | `/api/current-playlist` | Currently scheduled playlist |
 
-### Updates (Admin only)
+### System (Admin only)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/update/status` | Installed version, latest available, last update result |
 | POST | `/api/update/apply` | Start an update (returns immediately; poll status) |
+| GET | `/api/health` | Services, disk, CPU temperature, undervoltage, player heartbeat |
+| POST | `/api/system/power` | `{"action": "restart-display" \| "reboot" \| "shutdown"}` |
+| POST | `/api/player/heartbeat` | Reported by the player; unauthenticated like `/api/current-playlist` |
 
 ### Network (Admin only, requires NetworkManager)
 
@@ -494,9 +497,11 @@ sudo sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy dom
 - Verify ImageMagick is working: `magick --version` (IM7) or `convert --version` (IM6)
 
 ### PDF not displaying in player
-- Ensure the browser can reach `cdnjs.cloudflare.com` (PDF.js is loaded from CDN)
-- Check browser console for CORS or network errors
-- PDF playback requires an internet connection for the PDF.js library
+- The PDF renderer is vendored locally at `static/vendor/pdfjs/` by the installer, so PDFs work offline. Check those files exist:
+```bash
+ls -la /opt/lumina-signage/static/vendor/pdfjs/
+```
+- If they are missing, the installer could not download them. Re-run the installer with an internet connection, or the player will fall back to loading the renderer from `cdnjs.cloudflare.com` — which needs internet at playback time.
 
 ### Player shows "No content scheduled"
 - Ensure at least one playlist is marked **Active**

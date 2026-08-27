@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+# Device power control for LuminaShow (#32).
+#
+# Installed to /usr/local/sbin/lumina-power and invoked through its own
+# narrowly scoped sudoers grant. Takes only a fixed subcommand — no
+# user-supplied values reach it, so there is no injection surface.
+
+case "${1:-}" in
+  restart-display)
+    # Least disruptive remedy for a wedged screen, and the one to try first.
+    exec systemctl restart lumina-kiosk.service
+    ;;
+  reboot)
+    exec systemctl reboot
+    ;;
+  shutdown)
+    exec systemctl poweroff
+    ;;
+  *)
+    echo "usage: lumina-power {restart-display|reboot|shutdown}" >&2
+    exit 1
+    ;;
+esac

@@ -78,6 +78,7 @@ jobs:
           shellcheck -e SC1111 install.sh
           shellcheck uninstall.sh
           shellcheck scripts/lumina-net
+          shellcheck scripts/lumina-power
           shellcheck scripts/lumina-update
           shellcheck scripts/lumina-kiosk
           shellcheck scripts/lumina-netwatch

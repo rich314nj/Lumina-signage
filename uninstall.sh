@@ -38,8 +38,10 @@ else
 fi
 
 rm -f /usr/local/sbin/lumina-net /usr/local/sbin/lumina-update
-rm -f /usr/local/sbin/lumina-netwatch /usr/local/bin/lumina-kiosk
+rm -f /usr/local/sbin/lumina-power /usr/local/sbin/lumina-netwatch
+rm -f /usr/local/bin/lumina-kiosk
 rm -f /etc/sudoers.d/lumina-net /etc/sudoers.d/lumina-update
+rm -f /etc/sudoers.d/lumina-power
 rm -rf /var/lib/lumina
 echo -e "${GREEN}✓${RESET} Helper scripts removed"
 

@@ -312,6 +312,23 @@ select option { background: var(--surface2); }
             </div>
             <div style="padding:0 20px 14px;font-size:11px;color:var(--text3);font-family:var(--font-mono)">Letters, digits, and hyphens only · device becomes reachable as http://&lt;hostname&gt;.local</div>
           </div>
+          <div id="wifiBlockedNotice" style="display:none;margin-bottom:20px">
+            <div class="card" style="border-color:rgba(245,197,66,0.3)">
+              <div class="card-header"><span class="card-title">⚠ WiFi is turned off</span></div>
+              <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px">
+                <div style="font-size:13px;color:var(--text2);line-height:1.5">
+                  This device has a WiFi adapter, but the radio is switched off because no wireless region has been set. Regulations differ by country, so the radio stays off until you choose one. Setting it enables WiFi scanning and the setup hotspot.
+                </div>
+                <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+                  <div class="form-group" style="max-width:140px">
+                    <label>Country code</label>
+                    <input type="text" id="wifiCountry" maxlength="2" placeholder="US" style="text-transform:uppercase">
+                  </div>
+                  <button class="btn btn-primary" onclick="applyWifiCountry()">Turn on WiFi</button>
+                </div>
+              </div>
+            </div>
+          </div>
           <div id="netInterfaces"></div>
           <div class="card">
             <div class="card-header">
@@ -342,6 +359,25 @@ select option { background: var(--surface2); }
             </div>
             <div id="sysMessage" style="font-size:13px;color:var(--text2)">Checking…</div>
             <div id="sysActions" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+          </div>
+        </div>
+
+        <div class="card" style="max-width:640px;margin-top:20px">
+          <div class="card-header"><span class="card-title">Health</span></div>
+          <div id="healthBody" style="padding:16px 20px;font-size:13px;color:var(--text3)">Loading…</div>
+        </div>
+
+        <div class="card" style="max-width:640px;margin-top:20px">
+          <div class="card-header"><span class="card-title">Device</span></div>
+          <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn btn-secondary" onclick="devicePower('restart-display')">↻ Restart display</button>
+              <button class="btn btn-secondary" onclick="devicePower('reboot')">⟳ Reboot</button>
+              <button class="btn btn-danger" onclick="devicePower('shutdown')">⏻ Shut down</button>
+            </div>
+            <div style="font-size:12px;color:var(--text3)">
+              Restarting the display fixes most screen problems without interrupting anything else. Shutting down requires someone to power the device back on by hand.
+            </div>
           </div>
         </div>
       </div>
@@ -1044,7 +1080,24 @@ async function loadNetwork() {
     unavail.style.display = 'none';
     content.style.display = '';
     document.getElementById('netHostname').value = st.hostname;
+    // Explain a blocked radio rather than showing an empty scan list with no
+    // reason — the failure that made this hard to diagnose in the field (#28).
+    const blocked = st.has_wifi_device && st.wifi_blocked;
+    document.getElementById('wifiBlockedNotice').style.display = blocked ? '' : 'none';
     renderInterfaces(st.devices);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function applyWifiCountry() {
+  const country = document.getElementById('wifiCountry').value.trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(country)) {
+    toast('Enter a two-letter country code, for example US', 'error');
+    return;
+  }
+  try {
+    await api('POST', '/api/network/wifi/country', { country });
+    toast(`WiFi enabled for ${country}`, 'success');
+    await loadNetwork();
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -1219,7 +1272,85 @@ async function doApplyIp() {
 // ── System / updates ───────────────────────────────────────────────────────────
 let updatePoll = null;
 
+function healthRow(label, value, tone) {
+  const colour = { good: 'var(--green)', warn: 'var(--yellow)', bad: 'var(--red)' }[tone] || 'var(--text2)';
+  return `<div style="display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px solid var(--border)">
+    <span style="color:var(--text2)">${label}</span>
+    <span style="color:${colour};font-family:var(--font-mono);font-size:12px;text-align:right">${value}</span>
+  </div>`;
+}
+
+function formatUptime(seconds) {
+  if (seconds == null) return '—';
+  const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600), m = Math.floor((seconds % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+async function loadHealth() {
+  const el = document.getElementById('healthBody');
+  try {
+    const h = await api('GET', '/api/health');
+    let rows = '';
+
+    // The player heartbeat is the one that matters most: services can all be
+    // healthy while the screen shows nothing.
+    if (h.player) {
+      const stale = h.player.stale;
+      rows += healthRow('Display',
+        stale ? `no report for ${h.player.seconds_ago}s` : `showing ${esc(h.player.item || 'setup screen')}`,
+        stale ? 'bad' : 'good');
+    } else {
+      rows += healthRow('Display', 'has not reported yet', 'warn');
+    }
+
+    const services = h.services || {};
+    if (Object.keys(services).length) {
+      for (const [name, state] of Object.entries(services)) {
+        rows += healthRow(esc(name), esc(state), state === 'active' ? 'good' : 'bad');
+      }
+    }
+
+    if (h.disk) {
+      const pct = h.disk.percent_used;
+      rows += healthRow('Storage used',
+        `${pct}% · ${formatBytes(h.disk.free_bytes)} free`,
+        pct >= 90 ? 'bad' : pct >= 75 ? 'warn' : 'good');
+    }
+    if (h.cpu_temp_c != null) {
+      rows += healthRow('CPU temperature', `${h.cpu_temp_c} °C`,
+        h.cpu_temp_c >= 80 ? 'bad' : h.cpu_temp_c >= 70 ? 'warn' : 'good');
+    }
+    if (h.power) {
+      const now = h.power.undervoltage_now || h.power.throttled_now;
+      const ever = h.power.undervoltage_since_boot || h.power.throttled_since_boot;
+      rows += healthRow('Power supply',
+        now ? 'undervoltage detected now' : ever ? 'undervoltage seen since boot' : 'stable',
+        now ? 'bad' : ever ? 'warn' : 'good');
+    }
+    rows += healthRow('Uptime', formatUptime(h.uptime_seconds));
+    el.innerHTML = rows;
+  } catch (e) {
+    el.textContent = e.message;
+  }
+}
+
+async function devicePower(action) {
+  const prompts = {
+    'restart-display': 'Restart the display?\n\nThe screen goes blank for a few seconds, then resumes playing.',
+    'reboot': 'Reboot this device?\n\nThe screen will be blank for about a minute and this page will be unavailable until it returns.',
+    'shutdown': 'Shut down this device?\n\nSomeone will need to physically power it back on. It cannot be restarted from here.',
+  };
+  if (!confirm(prompts[action])) return;
+  try {
+    const res = await api('POST', '/api/system/power', { action });
+    toast(res.message || 'Done', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 async function loadSystem() {
+  loadHealth();
   const msg = document.getElementById('sysMessage');
   const actions = document.getElementById('sysActions');
   try {

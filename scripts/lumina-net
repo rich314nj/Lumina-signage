@@ -66,6 +66,24 @@ case "$cmd" in
     exec nmcli connection up "$conn"
     ;;
 
+  wifi-country)
+    # Raspberry Pi OS keeps the radio rfkill-blocked until a regulatory
+    # country is set, which leaves WiFi entirely unusable (#28).
+    cc="${1:-}"
+    [[ "$cc" =~ ^[A-Za-z]{2}$ ]] || die "country must be a two-letter code"
+    cc="${cc^^}"
+    if command -v raspi-config >/dev/null 2>&1; then
+      raspi-config nonint do_wifi_country "$cc" >/dev/null 2>&1 || true
+    fi
+    if command -v iw >/dev/null 2>&1; then
+      iw reg set "$cc" >/dev/null 2>&1 || true
+    fi
+    if command -v rfkill >/dev/null 2>&1; then
+      rfkill unblock wifi >/dev/null 2>&1 || true
+    fi
+    echo "wireless country set to $cc"
+    ;;
+
   hostname)
     name="${1:-}"
     valid_hostname "$name" || die "invalid hostname"
@@ -78,6 +96,6 @@ case "$cmd" in
     ;;
 
   *)
-    die "usage: lumina-net {wifi-rescan|wifi-connect|ip-dhcp|ip-static|hostname} ..."
+    die "usage: lumina-net {wifi-rescan|wifi-connect|wifi-country|ip-dhcp|ip-static|hostname} ..."
     ;;
 esac

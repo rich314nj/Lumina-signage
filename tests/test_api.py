@@ -237,6 +237,70 @@ def test_current_playlist_falls_back_to_first_active_playlist(client):
     assert body is not None and body["id"] == pid
 
 
+# ── Health and device control ─────────────────────────────────────────────────
+
+def test_health_requires_admin(client):
+    login(client)
+    make_user(client, "ed4", "editor")
+    client.get("/logout")
+
+    login(client, "ed4", "secret123")
+    assert client.get("/api/health", json={}).status_code == 403
+
+
+def test_health_reports_version_and_disk(client):
+    login(client)
+    body = client.get("/api/health").get_json()
+    import app as lumina
+    assert body["version"] == lumina.__version__
+    assert body["disk"]["total_bytes"] > 0
+    assert "services" in body
+
+
+def test_health_reports_no_player_before_any_heartbeat(client):
+    login(client)
+    assert client.get("/api/health").get_json()["player"] is None
+
+
+def test_heartbeat_is_accepted_without_a_session(client):
+    # The kiosk browser has no session; this must not require one.
+    res = client.post("/api/player/heartbeat",
+                      json={"item": "Slide 1", "playlist": "Lobby"})
+    assert res.status_code == 200
+
+
+def test_health_reports_a_fresh_heartbeat(client):
+    client.post("/api/player/heartbeat", json={"item": "Slide 1"})
+    login(client)
+    player = client.get("/api/health").get_json()["player"]
+    assert player["item"] == "Slide 1"
+    assert player["stale"] is False
+    assert player["seconds_ago"] < 5
+
+
+def test_heartbeat_truncates_oversized_values(client):
+    client.post("/api/player/heartbeat", json={"item": "x" * 5000})
+    login(client)
+    assert len(client.get("/api/health").get_json()["player"]["item"]) == 200
+
+
+def test_power_action_must_be_known(client):
+    login(client)
+    res = client.post("/api/system/power", json={"action": "selfdestruct"})
+    # 503 where the helper is absent (dev machines), 400 where it exists.
+    assert res.status_code in (400, 503)
+
+
+def test_power_requires_admin(client):
+    login(client)
+    make_user(client, "ed5", "editor")
+    client.get("/logout")
+
+    login(client, "ed5", "secret123")
+    assert client.post("/api/system/power",
+                       json={"action": "reboot"}).status_code == 403
+
+
 # ── Updates ───────────────────────────────────────────────────────────────────
 
 def test_update_status_requires_admin(client):

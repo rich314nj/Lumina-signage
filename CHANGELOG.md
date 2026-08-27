@@ -5,6 +5,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.9.0] — 2026-08-27
+
+Tier 2 of the roadmap in `CLAUDE.md`: make failures survivable and visible
+rather than silent and fatal.
+
+### Added
+
+- **Device controls** (#32) — **Restart display**, **Reboot**, and **Shut down**
+  on the System page (Admin only), via a new `scripts/lumina-power` helper with
+  its own scoped sudoers grant. *Restart display* restarts only the kiosk
+  browser: it is the least disruptive fix for a wedged screen and would have
+  recovered the white-screen failure without pulling the power.
+- **Health reporting** (#10) — a Health panel on the System page and
+  `GET /api/health` (Admin only) reporting service states, disk usage and
+  database size, CPU temperature, uptime, and **Raspberry Pi undervoltage and
+  throttling flags**, which are a common and easily missed cause of instability.
+- **Player heartbeat** (#10) — the player now reports what it is displaying to
+  `POST /api/player/heartbeat`, and Health shows either the item on screen or
+  how long it has been silent. This closes the gap where every service looked
+  healthy while the screen showed nothing — the exact situation that made the
+  white screen hard to diagnose. Held in memory deliberately: it describes the
+  current moment, and a restart should forget it rather than report stale data.
+- **WiFi is explained when it is switched off** (#28) — the Network page now
+  detects an rfkill-blocked radio and, instead of an empty scan list with no
+  explanation, says WiFi is off because no wireless region is set and offers a
+  country field to turn it on. Backed by `POST /api/network/wifi/country` and a
+  new `wifi-country` action in the network helper.
+
+### Fixed
+
+- **[Medium] PDFs required an internet connection** (#15) — PDF.js was loaded
+  from a CDN, so PDF assets silently failed to render on an offline device,
+  contradicting the offline-first design of the appliance image. The installers
+  now vendor it into `static/vendor/pdfjs/` at install time, and the player
+  loads it locally, falling back to the CDN only if the download was
+  unavailable. A PDF that cannot be rendered at all now reports why and skips
+  instead of showing a blank screen for its full duration.
+
+### Changed
+
+- `uninstall.sh` now also removes the power helper and its sudoers entry.
+
+---
+
 ## [1.8.0] — 2026-08-27
 
 Tier 3 of the roadmap in `CLAUDE.md`: lock the behaviour in with tests, then
