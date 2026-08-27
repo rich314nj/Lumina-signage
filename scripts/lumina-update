@@ -100,10 +100,13 @@ cmd_apply() {
 
   systemctl stop lumina.service >/dev/null 2>&1 || true
 
+  # static/vendor holds assets downloaded at install time, so it is absent from
+  # the archive; without this exclude, --delete would remove them.
   rsync -a --delete \
     --exclude '.git' \
     --exclude 'venv' \
     --exclude 'static/uploads' \
+    --exclude 'static/vendor' \
     --exclude 'lumina.db' \
     --exclude '.env' \
     "$src/" "$INSTALL_DIR/" || fail "Could not copy the new version into place."
@@ -113,22 +116,8 @@ cmd_apply() {
     rollback "$backup" "Dependency installation failed."
   fi
 
-  # Refresh the privileged helpers, which ship with the app.
-  for helper in lumina-net lumina-update; do
-    [[ -f "$INSTALL_DIR/scripts/$helper" ]] || continue
-    install -m 0755 "$INSTALL_DIR/scripts/$helper" "/usr/local/sbin/$helper"
-    sed -i 's/\r$//' "/usr/local/sbin/$helper"
-  done
-  for helper in lumina-kiosk lumina-netwatch; do
-    [[ -f "$INSTALL_DIR/scripts/$helper" ]] || continue
-    if [[ "$helper" == "lumina-kiosk" ]]; then
-      install -m 0755 "$INSTALL_DIR/scripts/$helper" "/usr/local/bin/$helper"
-      sed -i 's/\r$//' "/usr/local/bin/$helper"
-    else
-      install -m 0755 "$INSTALL_DIR/scripts/$helper" "/usr/local/sbin/$helper"
-      sed -i 's/\r$//' "/usr/local/sbin/$helper"
-    fi
-  done
+  install_helpers
+  fetch_pdfjs
 
   chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
 
@@ -153,14 +142,56 @@ cmd_apply() {
     "message=Updated to ${available}"
 }
 
+# Refresh the privileged helpers and their sudoers grants. This must cover
+# helpers that did not exist in the installed version — otherwise a new
+# capability ships with a UI that can never work, because neither the helper
+# nor its grant is ever created.
+install_helpers() {
+  local helper
+  for helper in lumina-net lumina-update lumina-power lumina-netwatch; do
+    [[ -f "$INSTALL_DIR/scripts/$helper" ]] || continue
+    install -m 0755 "$INSTALL_DIR/scripts/$helper" "/usr/local/sbin/$helper"
+    sed -i 's/\r$//' "/usr/local/sbin/$helper"
+  done
+
+  if [[ -f "$INSTALL_DIR/scripts/lumina-kiosk" ]]; then
+    install -m 0755 "$INSTALL_DIR/scripts/lumina-kiosk" /usr/local/bin/lumina-kiosk
+    sed -i 's/\r$//' /usr/local/bin/lumina-kiosk
+  fi
+
+  # Only the helpers the application itself invokes get a sudoers grant.
+  for helper in lumina-net lumina-update lumina-power; do
+    [[ -f "/usr/local/sbin/$helper" ]] || continue
+    printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/%s\n' \
+      "$APP_USER" "$helper" > "/etc/sudoers.d/$helper"
+    chmod 0440 "/etc/sudoers.d/$helper"
+  done
+}
+
+# static/vendor is gitignored, so it is absent from the downloaded archive and
+# is preserved rather than deleted during the sync. Fetch it if it is missing,
+# which is also how a device updating from a version before it existed gets it.
+fetch_pdfjs() {
+  local dir="$INSTALL_DIR/static/vendor/pdfjs" file
+  mkdir -p "$dir"
+  for file in pdf.min.js pdf.worker.min.js; do
+    [[ -s "$dir/$file" ]] && continue
+    curl -fsSL --max-time 60 -o "$dir/$file" \
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/${file}" || true
+  done
+}
+
 rollback() {
   local backup="$1" reason="$2"
   systemctl stop lumina.service >/dev/null 2>&1 || true
   if [[ -d "$backup/code" ]]; then
     rsync -a --delete \
-      --exclude 'venv' --exclude 'static/uploads' --exclude 'lumina.db' \
+      --exclude 'venv' --exclude 'static/uploads' --exclude 'static/vendor' \
+      --exclude 'lumina.db' \
       "$backup/code/" "$INSTALL_DIR/" || true
   fi
+  # The previous version's helpers must come back with its code.
+  install_helpers
   [[ -f "$backup/lumina.db" ]] && cp -a "$backup/lumina.db" "$INSTALL_DIR/" || true
   [[ -f "$backup/.env" ]] && cp -a "$backup/.env" "$INSTALL_DIR/" || true
   chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR" || true
