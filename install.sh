@@ -145,12 +145,9 @@ else
 fi
 
 # Verify ImageMagick and fix PDF policy (Ubuntu ships with PDF disabled by default)
-IM_BIN=""
 if command -v magick &>/dev/null; then
-  IM_BIN="magick"
   ok "ImageMagick 7 (magick) installed â€” PDF thumbnails enabled"
 elif command -v convert &>/dev/null; then
-  IM_BIN="convert"
   ok "ImageMagick 6 (convert) installed â€” PDF thumbnails enabled"
 else
   warn "ImageMagick not found â€” PDF thumbnails will be disabled (install with: sudo apt install imagemagick)"

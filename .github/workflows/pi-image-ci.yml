@@ -72,7 +72,10 @@ jobs:
       - name: Shellcheck
         run: |
           shellcheck install_rpi.sh
-          shellcheck install.sh
+          # SC1111: install.sh's banner text contains mis-encoded punctuation.
+          # Cosmetic and pre-existing; tracked separately rather than risking a
+          # blind re-encode of the whole file here.
+          shellcheck -e SC1111 install.sh
           shellcheck uninstall.sh
           shellcheck scripts/lumina-net
           shellcheck scripts/lumina-update
