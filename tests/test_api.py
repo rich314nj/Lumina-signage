@@ -379,6 +379,45 @@ def test_power_requires_admin(client):
                        json={"action": "reboot"}).status_code == 403
 
 
+# ── Clock ─────────────────────────────────────────────────────────────────────
+
+def test_clock_requires_admin(client):
+    login(client)
+    make_user(client, "ed7", "editor")
+    client.get("/logout")
+
+    login(client, "ed7", "secret123")
+    assert client.get("/api/system/clock", json={}).status_code == 403
+
+
+def test_clock_status_reports_a_timestamp(client):
+    login(client)
+    body = client.get("/api/system/clock").get_json()
+    assert "now" in body and body["now"]
+    assert "ntp_synchronized" in body
+
+
+def test_clock_set_is_refused_without_the_helper(client):
+    login(client)
+    res = client.post("/api/system/clock",
+                      json={"action": "manual", "datetime": "2026-01-01 12:00:00"})
+    assert res.status_code == 503
+
+
+def test_clock_set_rejects_malformed_datetime(client):
+    login(client)
+    res = client.post("/api/system/clock",
+                      json={"action": "manual", "datetime": "not a date"})
+    # 400 if the helper is present and validation runs, 503 if it is not.
+    assert res.status_code in (400, 503)
+
+
+def test_clock_set_rejects_unknown_action(client):
+    login(client)
+    res = client.post("/api/system/clock", json={"action": "rewind"})
+    assert res.status_code in (400, 503)
+
+
 # ── Timezone ──────────────────────────────────────────────────────────────────
 
 def test_timezone_requires_admin(client):

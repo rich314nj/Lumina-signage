@@ -4,7 +4,7 @@ Self-hosted digital signage for Raspberry Pi 4/5. Positioned as a direct
 replacement for Anthias/Screenly OSE, with the differentiator being **setup and
 network management that a non-technical person can do without a keyboard**.
 
-Repo: `rich314nj/Lumina-signage` · Current version: **1.10.0**
+Repo: `rich314nj/Lumina-signage` · Current version: **1.10.1**
 
 ---
 
@@ -201,7 +201,17 @@ Trust before features: the product's problem is reliability, not capability.
   page, backed by a new `timezone` action in `scripts/lumina-net` (validates
   against `timedatectl list-timezones` on-device; the zone list itself comes
   from Python's stdlib `zoneinfo`, so it works even where `timedatectl` is
-  absent for listing purposes)
+  absent for listing purposes). **1.10.1 extended the same card**: the Pi has
+  no battery-backed RTC, so timezone alone doesn't fix a wrong clock — if NTP
+  never syncs (offline first boot, isolated site), the underlying time can be
+  wrong with no fix but SSH. Added a sync/not-synced badge, a manual
+  date/time override (`clock-set` action: `set-ntp false` + `set-time`), and
+  a resync button (`ntp-enable`). `GET /api/system/clock` needs no privilege
+  (`timedatectl show` is world-readable); only the `POST` goes through the
+  helper. **Landmine for later**: this was found by the user asking "how is
+  the clock itself corrected" right after the timezone control shipped —
+  worth remembering that a *timezone* fix and a *clock* fix are two different
+  problems that look like one from the outside.
 - #18 asset date ranges · #25 playlist preview · #21 volume and fit ·
   #19 display power (CEC)
 

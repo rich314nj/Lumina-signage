@@ -95,6 +95,30 @@ case "$cmd" in
     echo "timezone set to $tz"
     ;;
 
+  ntp-enable)
+    # Re-enables automatic sync after a manual override, e.g. once a
+    # previously offline device regains network access.
+    command -v timedatectl >/dev/null 2>&1 || die "timedatectl not available"
+    timedatectl set-ntp true
+    ;;
+
+  clock-set)
+    # The Pi has no battery-backed RTC — it relies entirely on NTP reaching
+    # the internet at boot. If that never happens (offline first boot, an
+    # intentionally isolated site), the clock is simply wrong with no other
+    # way to correct it, and every schedule fires at the wrong time (#16).
+    # timedatectl refuses a manual set while NTP is enabled, so this turns
+    # NTP off first — ntp-enable above is how an operator turns it back on
+    # once real connectivity exists.
+    value="${1:-}"
+    [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}$ ]] \
+      || die "datetime must be 'YYYY-MM-DD HH:MM:SS'"
+    command -v timedatectl >/dev/null 2>&1 || die "timedatectl not available"
+    timedatectl set-ntp false
+    timedatectl set-time "$value"
+    echo "clock set to $value (automatic sync disabled)"
+    ;;
+
   hostname)
     name="${1:-}"
     valid_hostname "$name" || die "invalid hostname"
@@ -107,6 +131,6 @@ case "$cmd" in
     ;;
 
   *)
-    die "usage: lumina-net {wifi-rescan|wifi-connect|wifi-country|ip-dhcp|ip-static|hostname|timezone} ..."
+    die "usage: lumina-net {wifi-rescan|wifi-connect|wifi-country|ip-dhcp|ip-static|hostname|timezone|clock-set|ntp-enable} ..."
     ;;
 esac

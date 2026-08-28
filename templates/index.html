@@ -411,7 +411,31 @@ select option { background: var(--surface2); }
             Timezone control is not available on this system.
           </div>
           <div id="tzBody" style="display:none">
-            <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+            <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px">
+
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                <div>
+                  <div style="font-family:var(--font-mono);font-size:15px;font-weight:700" id="clockNow">—</div>
+                  <div id="clockStatusNote" style="font-size:11px;color:var(--text3);margin-top:2px"></div>
+                </div>
+                <span id="clockBadge" class="badge badge-gray">—</span>
+              </div>
+
+              <div id="clockWarning" class="note caution" style="display:none;font-size:12px;padding:10px 12px">
+                This device has no battery-backed clock — it relies entirely on reaching the internet to learn the correct time. Since it hasn't synced, its clock may be wrong, and <b>schedules will fire at the wrong time</b> until this is fixed. Set it manually below, or connect it to a network so it can sync automatically.
+              </div>
+
+              <div id="clockManualRow" style="display:none;gap:12px;align-items:flex-end;flex-wrap:wrap">
+                <div class="form-group" style="min-width:220px">
+                  <label>Set date &amp; time manually</label>
+                  <input type="datetime-local" id="clockManualInput" step="1">
+                </div>
+                <button class="btn btn-secondary" onclick="applyManualClock()">Set</button>
+              </div>
+              <button id="clockResyncBtn" class="btn btn-ghost btn-sm" style="display:none;align-self:flex-start" onclick="applyClockSync()">↻ Try automatic sync again (NTP)</button>
+
+              <div style="border-top:1px solid var(--border);margin:2px 0"></div>
+
               <div style="font-size:12px;color:var(--text3)">
                 Schedules run on this device's local time. If a schedule fires at the wrong hour, this is usually why.
               </div>
@@ -1414,6 +1438,83 @@ async function devicePower(action) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+function fmtLocalDatetimeInputValue(isoWithOffset) {
+  // <input type="datetime-local"> needs "YYYY-MM-DDTHH:MM:SS" with no
+  // timezone suffix, in the browser's own local time — which is what we
+  // want here anyway, since the operator sets the clock by looking at their
+  // own watch, not by doing timezone math.
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+async function loadClock() {
+  const badge = document.getElementById('clockBadge');
+  const now = document.getElementById('clockNow');
+  const note = document.getElementById('clockStatusNote');
+  const warning = document.getElementById('clockWarning');
+  const manualRow = document.getElementById('clockManualRow');
+  const resyncBtn = document.getElementById('clockResyncBtn');
+  try {
+    const c = await api('GET', '/api/system/clock');
+    if (!c.supported) {
+      badge.textContent = 'unavailable';
+      badge.className = 'badge badge-gray';
+      now.textContent = c.now ? new Date(c.now).toLocaleString() : '—';
+      note.textContent = '';
+      warning.style.display = 'none';
+      manualRow.style.display = 'none';
+      resyncBtn.style.display = 'none';
+      return;
+    }
+    now.textContent = new Date(c.now).toLocaleString();
+    if (c.ntp_synchronized) {
+      badge.textContent = 'synced';
+      badge.className = 'badge badge-green';
+      note.textContent = 'Kept correct automatically (NTP)';
+      warning.style.display = 'none';
+      manualRow.style.display = 'none';
+    } else {
+      badge.textContent = 'not synced';
+      badge.className = 'badge badge-yellow';
+      note.textContent = c.ntp_enabled
+        ? 'Waiting for a network connection to sync…'
+        : 'Automatic sync is off — set manually below';
+      warning.style.display = '';
+      manualRow.style.display = 'flex';
+      const input = document.getElementById('clockManualInput');
+      if (document.activeElement !== input) input.value = fmtLocalDatetimeInputValue();
+    }
+    resyncBtn.style.display = c.ntp_enabled ? 'none' : '';
+  } catch (e) {
+    badge.textContent = 'error';
+    badge.className = 'badge badge-red';
+    note.textContent = e.message;
+  }
+}
+
+async function applyManualClock() {
+  const raw = document.getElementById('clockManualInput').value;
+  if (!raw) { toast('Pick a date and time first', 'error'); return; }
+  // datetime-local gives "YYYY-MM-DDTHH:MM" or "...:SS" — normalize to the
+  // "YYYY-MM-DD HH:MM:SS" the backend expects.
+  const value = raw.replace('T', ' ') + (raw.length === 16 ? ':00' : '');
+  if (!confirm(`Set the device clock to ${value}?\n\nAutomatic time sync (NTP) will be turned off until you re-enable it.`)) return;
+  try {
+    await api('POST', '/api/system/clock', { action: 'manual', datetime: value });
+    toast('Clock updated', 'success');
+    await loadClock();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function applyClockSync() {
+  try {
+    await api('POST', '/api/system/clock', { action: 'sync' });
+    toast('Automatic time sync re-enabled', 'success');
+    await loadClock();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 async function loadTimezone() {
   const unavail = document.getElementById('tzUnavailable');
   const body = document.getElementById('tzBody');
@@ -1452,6 +1553,7 @@ async function applyTimezone() {
 
 async function loadSystem() {
   loadHealth();
+  loadClock();
   loadTimezone();
   const msg = document.getElementById('sysMessage');
   const actions = document.getElementById('sysActions');

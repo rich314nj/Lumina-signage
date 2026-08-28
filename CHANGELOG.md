@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.10.1] — 2026-08-28
+
+### Added
+
+- **Clock status and manual override on the System page** — 1.10.0 added a timezone control, but that only fixes how the clock is *interpreted*, not whether it's *correct*. The Pi has no battery-backed real-time clock: it relies entirely on reaching the internet at boot to learn the actual time via NTP. On a device that never gets that chance — an offline first boot, or a signage screen deliberately on an isolated network — the clock could be wrong with no way to fix it except SSH. The Date & Time card now shows the device's current time with a synced/not-synced badge; when not synced, a clear warning explains why and a manual date/time field appears (`timedatectl set-ntp false` + `set-time`, via a new `clock-set` action in `scripts/lumina-net`), plus a one-click "try automatic sync again" button (`ntp-enable`) for once real connectivity exists. `GET /api/system/clock` needs no special privilege — reading `timedatectl show` requires none — only the `POST` goes through the helper.
+
+---
+
 ## [1.10.0] — 2026-08-28
 
 Morning quick-wins batch: the four items queued from the previous session's

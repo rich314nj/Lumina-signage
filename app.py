@@ -6,7 +6,7 @@ Similar to Anthias/Screenly
 
 # Single source of truth for the version. Templates read it via the
 # app_version context processor; do not hardcode it in the UI.
-__version__ = "1.10.0"
+__version__ = "1.10.1"
 
 import os
 import io
@@ -1190,6 +1190,62 @@ def current_timezone():
         return None
     m = re.search(r"zoneinfo/(.+)$", real)
     return m.group(1) if m else None
+
+
+def clock_status():
+    """Reading clock/NTP state needs no privilege — timedatectl show is
+    readable by anyone. Only changing it goes through the helper."""
+    info = {}
+    if shutil.which("timedatectl"):
+        rc, out, _ = run_cmd(
+            ["timedatectl", "show", "-p", "NTP", "-p", "NTPSynchronized"], timeout=5
+        )
+        if rc == 0:
+            info = parse_kv(out)
+    return {
+        "now": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "ntp_enabled": info.get("NTP") == "yes",
+        # The device has no battery-backed RTC: until this is true at least
+        # once, "now" above is whatever the board happened to boot with, not
+        # a trustworthy clock (#16).
+        "ntp_synchronized": info.get("NTPSynchronized") == "yes",
+        "supported": shutil.which("timedatectl") is not None,
+    }
+
+
+@app.route("/api/system/clock")
+@login_required
+@role_required("admin")
+def api_system_clock():
+    return jsonify(clock_status())
+
+
+@app.route("/api/system/clock", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_system_clock_set():
+    if not os.path.exists(NET_HELPER):
+        return jsonify({"error": "Clock control is not available on this system"}), 503
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+    action = data.get("action")
+
+    if action == "sync":
+        rc, out, err = run_net_helper(["ntp-enable"], timeout=20)
+    elif action == "manual":
+        value = data.get("datetime", "")
+        if not isinstance(value, str) or not re.fullmatch(
+            r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", value
+        ):
+            return jsonify({"error": "datetime must be 'YYYY-MM-DD HH:MM:SS'"}), 400
+        rc, out, err = run_net_helper(["clock-set", value], timeout=20)
+    else:
+        return jsonify({"error": "action must be 'sync' or 'manual'"}), 400
+
+    if rc != 0:
+        return jsonify({"error": err or out or "Could not update the clock"}), 502
+    return jsonify({"success": True, **clock_status()})
 
 
 @app.route("/api/system/timezone")
