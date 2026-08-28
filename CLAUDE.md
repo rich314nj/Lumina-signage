@@ -215,7 +215,8 @@ Trust before features: the product's problem is reliability, not capability.
 
 ### Tier 5 — Features, in market-value order
 - #17 rotation/portrait (biggest market unlock)
-- **#38 zero-typing setup.** Item 1 (WiFi QR code) ✅ **done in 1.10.0** —
+- **#38 zero-typing setup.** Item 1 (WiFi QR code) ✅ **done in 1.10.0,
+  hardware-verified 2026-08-28** —
   server-side SVG via the `qrcode` lib (no Pillow), two unauthenticated
   endpoints (`/api/device-info/qr/wifi.svg`, `/api/device-info/qr/address.svg`)
   matching `/api/device-info`'s exposure, rendered beside the existing text
@@ -224,7 +225,8 @@ Trust before features: the product's problem is reliability, not capability.
   constraint documented there: the Pi cannot scan while acting as an access
   point, so any network list must be scanned and cached *before* the hotspot
   goes up.
-- ~~#16 timezone UI~~ ✅ **done in 1.10.0** — Date & Time card on the System
+- ~~#16 timezone UI~~ ✅ **done in 1.10.0, hardware-verified 2026-08-28** —
+  Date & Time card on the System
   page, backed by a new `timezone` action in `scripts/lumina-net` (validates
   against `timedatectl list-timezones` on-device; the zone list itself comes
   from Python's stdlib `zoneinfo`, so it works even where `timedatectl` is
@@ -271,8 +273,8 @@ Trust before features: the product's problem is reliability, not capability.
 - ~~#7~~ hardware-verified and closed — hostname/WiFi/status/scan confirmed
   earlier; Ethernet↔WiFi live-swap (unplug/replug while running) confirmed
   2026-08-28.
-- #42 (schedule playlist not saving) fixed in code 2026-08-28, awaiting
-  hardware confirmation like everything else in this list.
+- ~~#42~~ hardware-verified and closed — schedule playlist save confirmed
+  working 2026-08-28.
 
 ---
 
