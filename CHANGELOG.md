@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.9.1] — 2026-08-27
+
+### Fixed
+
+- **[High] The navigation menu was invisible on phones** (#39) — the mobile rule hid `.nav-item span`, which matched the icon as well as the label, so every navigation item rendered completely empty. The sidebar collapsed to a bare strip with nothing in it and no way to tell one item from another; reaching **Network** required rotating the phone to landscape. This mattered more than a normal layout bug because the setup screen instructs people to configure the device from a phone, and Network is the first page they need — so the documented first-run path led straight into an unusable menu.
+  - Below 900px only the label is hidden, so the icon rail works as intended.
+  - Below 640px the sidebar becomes a horizontally scrollable row of **labelled** chips rather than bare icons, because someone hunting for "Network" should not have to guess at a glyph.
+- **Cramped two-column layouts on small screens** — the dashboard's Recent Playlists / Active Schedules pair was a hardcoded inline two-column grid, and `.form-row` (used by Add User, the static IP dialog, and others) was fixed at two columns. Both now collapse to a single column below 900px.
+- Phone-sized refinements: tighter page and modal padding, stacked page headers, and wrapping header actions.
+
+---
+
 ## [1.9.0] — 2026-08-27
 
 Tier 2 of the roadmap in `CLAUDE.md`: make failures survivable and visible
