@@ -184,7 +184,7 @@ Trust before features: the product's problem is reliability, not capability.
   the installer generates is invisible to updates — check the update path
   when changing a generated file.**
 
-### Tier 4 — Hardening ✅ done in 1.11.0
+### Tier 4 — Hardening ✅ done in 1.11.0 (bugfix 1.11.1)
 - ~~#11 SD card wear~~ — the fix was logging, not polling frequency: nginx
   `access_log off` for the polling endpoints, gunicorn access log dropped
   entirely, journald capped (persistent, not volatile — `journalctl` on a
@@ -199,12 +199,18 @@ Trust before features: the product's problem is reliability, not capability.
   hotspot password); login throttled (10/5min per IP via `ProxyFix`);
   session cookie `HttpOnly`+`SameSite=Lax`; gunicorn bound to `127.0.0.1`
   instead of `0.0.0.0`. HTTPS deliberately out of scope (see the issue).
+  **1.11.0 shipped without a way to actually see the password anywhere in
+  the UI — fixed in 1.11.1, hardware-verified 2026-08-28** (setup screen
+  correctly showed `admin / fee17036b0c9` on device `lumina-ci`).
 - ~~#23 backup/restore~~ — export/import on the System page, new
   `scripts/lumina-backup` helper using the same detach-via-`systemd-run`
   pattern as `lumina-update`, previous state backed up before any restore.
+  **Not yet hardware-verified** — needs a real export→restore round-trip on
+  a device.
 - ~~#24 storage hygiene~~ — orphan file detection (report-then-delete, two
   separate calls) correctly checks both `Asset.uri` *and* `Asset.thumbnail`;
-  uploads refused with `507` below a free-space floor.
+  uploads refused with `507` below a free-space floor. **Not yet
+  hardware-verified.**
 - **Bug found while building #23**: `/api/health`'s disk report and the new
   backup export both hardcoded `BASE_DIR / "lumina.db"` instead of reading
   `SQLALCHEMY_DATABASE_URI` back — harmless until `DATABASE_URL` is actually
@@ -268,13 +274,14 @@ Trust before features: the product's problem is reliability, not capability.
 - #4 standalone player → #8 fleet management (v2.5), designed together ·
   #20 multi-zone layouts
 
-### Needs hardware verification, then close
-- ~~#3~~ hardware-verified and closed.
-- ~~#7~~ hardware-verified and closed — hostname/WiFi/status/scan confirmed
-  earlier; Ethernet↔WiFi live-swap (unplug/replug while running) confirmed
-  2026-08-28.
-- ~~#42~~ hardware-verified and closed — schedule playlist save confirmed
-  working 2026-08-28.
+### Hardware verification — outstanding
+Everything through the morning quick-wins batch (#42, #38 item 1, #16) plus
+#3 and #7 is now hardware-verified (2026-08-27/28) — see the strikethrough
+notes above and in Tier 5. What's left, all from Tier 4:
+- #23 backup/restore — no real device round-trip yet
+- #24 storage hygiene — orphan scan/clean not yet run on a device
+- #11 SD-card wear — nothing to click; verify by absence (SD card should
+  simply wear less over time / `journalctl` volume stays low)
 
 ---
 
