@@ -230,8 +230,21 @@ Trust before features: the product's problem is reliability, not capability.
   the clock itself corrected" right after the timezone control shipped —
   worth remembering that a *timezone* fix and a *clock* fix are two different
   problems that look like one from the outside.
-- #18 asset date ranges · #25 playlist preview · #21 volume and fit ·
-  #19 display power (CEC)
+- #18 asset date ranges · #25 playlist preview · #21 volume and fit
+- **#19 display power (CEC).** A full implementation brief already exists at
+  [`Issues and Features/ISSUE_19_IMPLEMENTATION_GUIDANCE.md`](../Issues%20and%20Features/ISSUE_19_IMPLEMENTATION_GUIDANCE.md) —
+  written by the project owner, not generated. Read it before starting;
+  do not re-derive the design. Highlights that matter most: CEC and Wayland
+  blanking are explicit, non-fallback choices; scheduling must never be able
+  to shut down the Pi itself, only the display; CEC scheduling requires a
+  confirmed sleep/wake compatibility test before it can be enabled; the
+  scheduler is a dedicated systemd service/timer, never a Flask background
+  thread (two gunicorn workers would double-run it); an untrusted device
+  clock must fail open (keep the display awake) rather than risk sleeping it
+  on bad data — ties directly into the clock-trust work from #16/1.10.1.
+  Recommended delivery is two phases (manual control + compatibility test,
+  then scheduling + health integration) — see the brief for the full
+  breakdown, data model, and acceptance criteria.
 
 ### Pre-release polish — do last, once the UI has stopped moving
 - **#43 in-app help** — a help icon opening built-in end-user documentation.
