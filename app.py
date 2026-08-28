@@ -792,10 +792,21 @@ def api_create_asset():
     if not file.filename or not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type"}), 400
 
-    # Backstop for when Content-Length was absent, or another upload raced
-    # this one for the same free space between the check above and here.
+    # Merely accessing request.files above already fully parsed the
+    # multipart body, which for a large file means Werkzeug has already
+    # spooled it to a temp file on this same filesystem. file.save() below
+    # does a stream copy, not a rename, so for a moment there are TWO
+    # copies of the upload on disk at once: the temp file that already
+    # landed, plus the one save() is about to write. The Content-Length
+    # check above only guarantees room for the first copy - measuring the
+    # actual size straight off the now-parsed stream (rather than trusting
+    # Content-Length again) also covers the case where it was absent or
+    # understated, since this number doesn't depend on that header at all.
+    file.stream.seek(0, os.SEEK_END)
+    upload_size = file.stream.tell()
+    file.stream.seek(0)
     free_bytes = shutil.disk_usage(str(UPLOAD_FOLDER)).free
-    if free_bytes < MIN_FREE_DISK_BYTES:
+    if free_bytes - upload_size < MIN_FREE_DISK_BYTES:
         return jsonify({
             "error": (
                 f"Not enough disk space to accept this upload "
@@ -1479,31 +1490,35 @@ def find_orphaned_upload_files():
     return orphans
 
 
+ORPHAN_BATCH_LIMIT = 200
+
+
 @app.route("/api/storage/orphans")
 @login_required
 @role_required("admin")
 def api_storage_orphans():
     """Report only — deletion is a separate, explicit call (#24). Issues a
-    scan_token binding this exact candidate list to whatever DELETE call
-    follows, so cleanup can never silently remove a file this scan never
-    saw (see api_storage_orphans_clean)."""
+    scan_token binding DELETE to exactly the files listed in `files` below
+    — never more. When there are more than ORPHAN_BATCH_LIMIT orphans,
+    cleanup only ever covers the batch actually shown; removing it and
+    scanning again reveals the next batch. This is what makes "report
+    before delete" a real guarantee rather than just a display detail: the
+    admin can never have fewer files shown to them than files a cleanup
+    click can remove."""
     _prune_orphan_scans()
     orphans = find_orphaned_upload_files()
     total = sum(f.stat().st_size for f in orphans)
+    batch = orphans[:ORPHAN_BATCH_LIMIT]
     token = secrets.token_urlsafe(16)
     _orphan_scans[token] = {
-        "paths": [str(f.resolve()) for f in orphans],
+        "paths": [str(f.resolve()) for f in batch],
         "expires": time.time() + ORPHAN_SCAN_TOKEN_TTL_SECONDS,
     }
     return jsonify({
         "count": len(orphans),
         "total_bytes": total,
-        # Capped: a very messy install should not return an enormous payload.
-        # The cap is display-only — scan_token still covers every candidate,
-        # not just the first 200, so cleanup never acts on files the count
-        # above didn't already account for.
-        "files": [str(f.relative_to(UPLOAD_FOLDER)) for f in orphans[:200]],
-        "truncated": len(orphans) > 200,
+        "files": [str(f.relative_to(UPLOAD_FOLDER)) for f in batch],
+        "truncated": len(orphans) > ORPHAN_BATCH_LIMIT,
         "scan_token": token,
     })
 
@@ -1512,11 +1527,13 @@ def api_storage_orphans():
 @login_required
 @role_required("admin")
 def api_storage_orphans_clean():
-    """Deletes only the intersection of: a specific prior scan's candidate
-    list, a fresh re-scan (still unreferenced, still older than the grace
-    period), and actually inside UPLOAD_FOLDER. This closes the gap where a
-    naive re-scan-on-delete could remove a file the admin never reviewed —
-    created after the GET, or outside what the GET reported (#24)."""
+    """Deletes only the intersection of: the specific batch a prior scan
+    both found AND returned in `files` (never more than ORPHAN_BATCH_LIMIT
+    — see api_storage_orphans), a fresh re-scan (still unreferenced, still
+    older than the grace period), and actually inside UPLOAD_FOLDER. This
+    closes the gap where a naive re-scan-on-delete could remove a file the
+    admin never reviewed — created after the GET, outside what the GET
+    reported, or simply past the display cap (#24)."""
     _prune_orphan_scans()
     data = get_json_dict() or {}
     token = data.get("scan_token") or request.args.get("scan_token")

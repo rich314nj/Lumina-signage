@@ -660,6 +660,44 @@ def test_storage_orphans_clean_ignores_files_created_after_the_scan(client):
         late.unlink(missing_ok=True)
 
 
+def test_storage_orphans_clean_never_removes_more_than_the_admin_was_shown(client):
+    """A cleanup click must only ever act on files the admin actually saw
+    listed - not a larger real total. With more orphans than
+    ORPHAN_BATCH_LIMIT, DELETE removes only that batch; the rest need a
+    fresh scan (#24 - 'report before delete' must be a real guarantee, not
+    just a display detail)."""
+    import app as lumina
+
+    login(client)
+    total_files = lumina.ORPHAN_BATCH_LIMIT + 5
+    strays = []
+    for i in range(total_files):
+        f = lumina.UPLOAD_FOLDER / f"batch-cap-{i}.jpg"
+        f.write_bytes(b"x")
+        _age_file(f, lumina.ORPHAN_GRACE_SECONDS + 60)
+        strays.append(f)
+    try:
+        body = client.get("/api/storage/orphans").get_json()
+        assert body["count"] == total_files
+        assert len(body["files"]) == lumina.ORPHAN_BATCH_LIMIT
+        assert body["truncated"] is True
+
+        res = client.delete("/api/storage/orphans", json={"scan_token": body["scan_token"]})
+        first_batch = res.get_json()
+        assert first_batch["removed"] == lumina.ORPHAN_BATCH_LIMIT
+
+        remaining = client.get("/api/storage/orphans").get_json()
+        assert remaining["count"] == 5
+        assert remaining["truncated"] is False
+
+        res = client.delete("/api/storage/orphans", json={"scan_token": remaining["scan_token"]})
+        second_batch = res.get_json()
+        assert second_batch["removed"] == 5
+    finally:
+        for f in strays:
+            f.unlink(missing_ok=True)
+
+
 def test_upload_is_refused_when_disk_is_nearly_full(client, monkeypatch):
     """Regression coverage for #24 - a full disk previously failed with
     whatever the OS write error happened to be, mid-write, on the same
@@ -704,6 +742,36 @@ def test_upload_is_refused_when_it_would_leave_less_than_the_reserve(client, mon
         # what the pre-parse check is meant to catch from a real client.
         environ_overrides={"CONTENT_LENGTH": str(800 * 1024 * 1024)},
     )
+    assert res.status_code == 507
+
+
+def test_upload_is_refused_when_the_spool_and_final_copy_would_not_both_fit(client, monkeypatch):
+    """Models the double-copy peak (#24): request.files is fully parsed by
+    the time file.save() is reached, which means Werkzeug has already
+    spooled the upload to a temp file on this same filesystem - save()
+    then does a second, separate copy into UPLOAD_FOLDER rather than a
+    rename. A disk reading taken before parsing can look fine while the
+    post-spool reading would not leave room for that second copy. The
+    check right before file.save() must use a fresh reading and the
+    actual (stream-measured) size, not just repeat the earlier one."""
+    import io as _io
+    import app as lumina
+    from collections import namedtuple
+
+    Usage = namedtuple("Usage", "total used free")
+    # First call is the pre-parse Content-Length check - plenty of room.
+    # Second call is the post-parse check right before file.save() - only
+    # what would realistically be left after a same-size temp spool
+    # already landed, not enough for a second copy plus the reserve.
+    readings = iter([
+        Usage(10_000_000_000, 0, 3_000_000_000),
+        Usage(10_000_000_000, 0, 150 * 1024 * 1024),
+    ])
+    monkeypatch.setattr(lumina.shutil, "disk_usage", lambda path: next(readings))
+
+    login(client)
+    data = {"file": (_io.BytesIO(b"stand-in body"), "video.mp4")}
+    res = client.post("/api/assets", data=data, content_type="multipart/form-data")
     assert res.status_code == 507
 
 
@@ -835,12 +903,19 @@ def test_backup_import_rejects_non_zip_filename(client):
         lumina.BACKUP_HELPER = original
 
 
-def test_backup_import_rejects_a_zip_with_no_database(client, tmp_path):
+def test_backup_import_rejects_a_zip_with_no_database(client, tmp_path, monkeypatch):
     import app as lumina
     import io as _io
     import zipfile
 
     login(client)
+    # This is the one backup-import test that actually reaches
+    # os.makedirs(RESTORE_STAGING_DIR) - the real path is
+    # /var/lib/lumina/restore-uploads, which a CI runner has no permission
+    # to create. Point it at a throwaway directory instead; production
+    # restore behavior (the real path, the privileged-helper handoff) is
+    # untouched.
+    monkeypatch.setattr(lumina, "RESTORE_STAGING_DIR", str(tmp_path / "restore-uploads"))
     original = lumina.BACKUP_HELPER
     lumina.BACKUP_HELPER = sys.executable
     try:
