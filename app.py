@@ -6,7 +6,7 @@ Similar to Anthias/Screenly
 
 # Single source of truth for the version. Templates read it via the
 # app_version context processor; do not hardcode it in the UI.
-__version__ = "1.9.2"
+__version__ = "1.9.3"
 
 import os
 import re

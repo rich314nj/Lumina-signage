@@ -16,7 +16,9 @@ SETUP_AP=true
 # rfkill-blocked until a regulatory country is set.
 WIFI_COUNTRY="${LUMINA_WIFI_COUNTRY:-US}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SECRET_KEY="${LUMINA_SECRET_KEY:-$(openssl rand -hex 32)}"
+# Resolved after argument parsing, so an existing key can be reused.
+SECRET_KEY="${LUMINA_SECRET_KEY:-}"
+REPROVISION=false
 
 usage() {
   cat <<EOF
@@ -30,6 +32,10 @@ Options:
   --skip-apt                 Skip apt update/install (if already provisioned)
   --no-start                 Enable services but do not start them (image build)
   --no-setup-ap              Do not install the WiFi setup-hotspot fallback
+  --reprovision              Rewrite service units, nginx config, and helpers
+                             for an install whose code is already in place.
+                             Preserves the database, uploads, and secret key.
+                             Used by lumina-update.
   --wifi-country <cc>        Wireless regulatory country (default: US).
                              Required for WiFi to work at all; use "" to skip.
   -h, --help                 Show this help
@@ -64,6 +70,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-setup-ap)
       SETUP_AP=false
+      shift
+      ;;
+    --reprovision)
+      REPROVISION=true
+      SKIP_APT=true
+      NON_INTERACTIVE=true
       shift
       ;;
     --wifi-country)
@@ -145,16 +157,33 @@ mkdir -p "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR/static/uploads/thumbnails"
 mkdir -p /var/log/lumina
 
-rsync -a \
-  --exclude '.git' \
-  --exclude '__pycache__' \
-  --exclude 'venv' \
-  --exclude 'lumina.db' \
-  "$SCRIPT_DIR/" "$INSTALL_DIR/"
+# --reprovision rewrites the unit files, nginx config, and helpers for an
+# install whose code is already in place. The updater uses it, because those
+# files are generated here and would otherwise never be refreshed by an
+# update — a device could run new code under an old systemd unit.
+if [[ "$REPROVISION" != true ]]; then
+  rsync -a \
+    --exclude '.git' \
+    --exclude '__pycache__' \
+    --exclude 'venv' \
+    --exclude 'static/vendor' \
+    --exclude 'lumina.db' \
+    "$SCRIPT_DIR/" "$INSTALL_DIR/"
 
-python3 -m venv "$INSTALL_DIR/venv"
-"$INSTALL_DIR/venv/bin/pip" install --upgrade pip
-"$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+  python3 -m venv "$INSTALL_DIR/venv"
+  "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
+  "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
+fi
+
+# Reuse the existing key rather than minting a new one. Regenerating it logs
+# every user out, and if only one of .env and the systemd unit were rewritten
+# they would disagree about the key entirely.
+if [[ -z "$SECRET_KEY" && -f "$INSTALL_DIR/.env" ]]; then
+  SECRET_KEY="$(grep -m1 '^SECRET_KEY=' "$INSTALL_DIR/.env" | cut -d= -f2- || true)"
+fi
+if [[ -z "$SECRET_KEY" ]]; then
+  SECRET_KEY="$(openssl rand -hex 32)"
+fi
 
 cat > "$INSTALL_DIR/.env" <<EOF
 SECRET_KEY=$SECRET_KEY
@@ -269,7 +298,7 @@ for policy_file in /etc/ImageMagick-*/policy.xml; do
 done
 
 # Initialize DB only if missing.
-if [[ ! -f "$INSTALL_DIR/lumina.db" ]]; then
+if [[ "$REPROVISION" != true ]] && [[ ! -f "$INSTALL_DIR/lumina.db" ]]; then
   sudo -u "$APP_USER" "$INSTALL_DIR/venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app import init_db; init_db()"
 fi
 

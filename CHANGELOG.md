@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.9.3] — 2026-08-27
+
+The update path was confirmed working on hardware (1.9.1 → 1.9.2), which
+immediately exposed a gap in what an update actually replaces.
+
+### Fixed
+
+- **[Critical] Updates did not refresh service units or the nginx config** (#41) — those files are *generated* by the installer rather than shipped in the repository, so copying new code never touched them. A device could therefore run new code under an old systemd unit and report the new version while behaving like the old one. The 1.9.2 kiosk fix was entirely contained in the `lumina-kiosk.service` unit, so a device updated from 1.9.1 to 1.9.2 would have reported 1.9.2 while still failing exactly as before — a silent, and very misleading, no-op.
+  - `install_rpi.sh` gains `--reprovision`, which rewrites the unit files, nginx config, helpers, and sudoers grants for an install whose code is already in place, leaving the database, uploads, and secret key untouched.
+  - `lumina-update` calls it after syncing, and again on rollback so a reverted device gets its previous units back.
+- **[High] Re-running the installer rotated the secret key** — `SECRET_KEY` was regenerated unconditionally, logging every user out on a reinstall. Worse, since the key is written into both `.env` and the systemd unit, refreshing only one of them would leave the two disagreeing. The existing key is now reused when present.
+- `install_rpi.sh` also excludes `static/vendor` when syncing, matching the updater, so a reinstall no longer discards the vendored PDF.js.
+
+---
+
 ## [1.9.2] — 2026-08-27
 
 ### Fixed

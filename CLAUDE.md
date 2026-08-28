@@ -105,6 +105,12 @@ do not try to "fix" it by reintroducing qemu.
   not fail loudly, it just loses the display. Diagnose with
   `systemctl stop getty@tty1 && systemctl restart lumina-kiosk` — if that fixes
   it, it is VT contention.
+- **Anything the installer *generates* is invisible to an update.** Unit files,
+  the nginx config, helpers, and sudoers grants are written by
+  `install_rpi.sh`, not shipped as files, so syncing new code does not refresh
+  them — a device can run new code under an old unit and report the new
+  version. `lumina-update` calls `install_rpi.sh --reprovision` for this.
+  **When you change a generated file, check the update path carries it.**
 - **pi-gen needs `DISABLE_FIRST_BOOT_USER_RENAME=1`.** Setting `FIRST_USER_NAME`
   alone is not enough: the first-boot user wizard still ships, and
   `userconfig.service` blocks on tty1 with no timeout waiting for input.
