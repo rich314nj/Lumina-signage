@@ -1689,11 +1689,20 @@ const DISPLAY_ORIENTATIONS = [
 // through wlr-randr at the Wayland output layer (scripts/lumina-kiosk), not
 // CSS. The colored bar always marks the same physical edge of the
 // rectangle, so rotating it visually shows which edge becomes "top".
+//
+// Direction matters here: the Wayland wl_output transform values passed to
+// wlr-randr (and stored/sent to the API exactly as-is - never touched by
+// this fix) rotate the output COUNTER-clockwise, but SVG/CSS `rotate()`
+// with a positive angle turns visually CLOCKWISE. Negating the angle for
+// the preview is what makes the marked edge end up where it actually will
+// on the real screen; it is purely a rendering choice; the "90"/"270"
+// values themselves are never renamed or swapped.
 function displayShapeSvg(rotation, selected) {
   const stroke = selected ? 'var(--accent)' : 'var(--border)';
   const bar = selected ? 'var(--accent)' : 'var(--text3)';
+  const previewDeg = -rotation;
   return `<svg width="56" height="56" viewBox="0 0 56 56">
-    <g transform="rotate(${rotation} 28 28)">
+    <g transform="rotate(${previewDeg} 28 28)">
       <rect x="10" y="16" width="36" height="24" rx="3" fill="none" stroke="${stroke}" stroke-width="2"/>
       <rect x="10" y="16" width="36" height="5" rx="2" fill="${bar}"/>
     </g>

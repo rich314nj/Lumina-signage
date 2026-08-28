@@ -1452,12 +1452,23 @@ def current_display_rotation():
     start — reading needs no privilege (the file is world-readable, same
     exposure pattern as the timezone/clock reads); only writing it goes
     through the helper. Never sourced - parsed and validated exactly like
-    lumina-kiosk parses it, and defaults to "0" the same way for a missing,
-    unreadable, or malformed file, so this always reflects what the kiosk
-    will actually do."""
+    lumina-kiosk parses it (strictly the FIRST line, nothing scanned
+    further into the file, on both sides), and defaults to "0" the same
+    way for a missing, unreadable, or malformed file, so this always
+    reflects what the kiosk will actually do."""
     text = read_first_line(DISPLAY_CONF) or ""
     value = parse_kv(text).get("ROTATION", "0")
     return value if value in VALID_ROTATIONS else "0"
+
+
+def display_rotation_supported():
+    """The helper existing is not enough - it only writes the config file
+    and restarts the kiosk. Whether rotation actually DOES anything depends
+    on wlr-randr being installed, which is a best-effort apt install on a
+    device that updated from before #17 existed (see lumina-update) and can
+    genuinely be missing. Reporting "supported" without checking this would
+    let POST return success while the kiosk silently starts unrotated."""
+    return os.path.exists(DISPLAY_HELPER) and shutil.which("wlr-randr") is not None
 
 
 @app.route("/api/system/display")
@@ -1466,7 +1477,7 @@ def current_display_rotation():
 def api_system_display():
     return jsonify({
         "rotation": current_display_rotation(),
-        "supported": os.path.exists(DISPLAY_HELPER),
+        "supported": display_rotation_supported(),
     })
 
 
@@ -1474,7 +1485,7 @@ def api_system_display():
 @login_required
 @role_required("admin")
 def api_system_display_set():
-    if not os.path.exists(DISPLAY_HELPER):
+    if not display_rotation_supported():
         return jsonify({"error": "Display rotation is not available on this system"}), 503
     data = get_json_dict()
     if not data:

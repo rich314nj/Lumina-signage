@@ -552,6 +552,20 @@ def test_display_get_defaults_to_zero_for_a_malformed_config(client, monkeypatch
     conf.write_text("something else entirely\n", encoding="utf-8")
     assert client.get("/api/system/display").get_json()["rotation"] == "0"
 
+    # A ROTATION= line that isn't the FIRST line must never be picked up -
+    # scripts/lumina-kiosk parses with the same strict first-line-only rule
+    # (previously it grepped the whole file, which could disagree with this
+    # read for a hand-edited or multi-line file; #17 follow-up).
+    conf.write_text("# a comment\nROTATION=90\n", encoding="utf-8")
+    assert client.get("/api/system/display").get_json()["rotation"] == "0"
+
+
+def _mock_wlr_randr_present(monkeypatch, lumina):
+    monkeypatch.setattr(
+        lumina.shutil, "which",
+        lambda name: "/usr/bin/wlr-randr" if name == "wlr-randr" else None
+    )
+
 
 def test_display_post_is_refused_without_the_helper(client):
     login(client)
@@ -559,12 +573,55 @@ def test_display_post_is_refused_without_the_helper(client):
     assert res.status_code == 503
 
 
-def test_display_post_rejects_an_invalid_rotation(client):
+def test_display_supported_requires_both_the_helper_and_wlr_randr(client, monkeypatch):
+    """The helper only writes the config and restarts the kiosk - whether
+    rotation does anything at all also depends on wlr-randr being
+    installed, which is a best-effort apt install on an updated device and
+    can genuinely be absent. Neither one alone should report supported
+    (#17)."""
+    import app as lumina
+
+    login(client)
+    original_helper = lumina.DISPLAY_HELPER
+    try:
+        # Neither present (the default on a dev machine/CI runner).
+        assert client.get("/api/system/display").get_json()["supported"] is False
+
+        # Helper present, wlr-randr still absent.
+        lumina.DISPLAY_HELPER = sys.executable
+        assert client.get("/api/system/display").get_json()["supported"] is False
+
+        # Both present.
+        _mock_wlr_randr_present(monkeypatch, lumina)
+        assert client.get("/api/system/display").get_json()["supported"] is True
+    finally:
+        lumina.DISPLAY_HELPER = original_helper
+
+
+def test_display_post_is_refused_when_wlr_randr_is_missing(client):
+    """A device that updated from before #17 existed may have the helper
+    (freshly synced code) but not wlr-randr (best-effort apt install that
+    can fail offline) - POST must refuse cleanly rather than report success
+    while the kiosk silently starts unrotated (#17)."""
+    import app as lumina
+
+    login(client)
+    original_helper = lumina.DISPLAY_HELPER
+    lumina.DISPLAY_HELPER = sys.executable  # helper "present", wlr-randr is not
+    try:
+        res = client.post("/api/system/display", json={"rotation": "90"})
+        assert res.status_code == 503
+    finally:
+        lumina.DISPLAY_HELPER = original_helper
+
+
+def test_display_post_rejects_an_invalid_rotation(client, monkeypatch):
     import app as lumina
 
     login(client)
     original_helper = lumina.DISPLAY_HELPER
     lumina.DISPLAY_HELPER = sys.executable  # any real, existing file
+    _mock_wlr_randr_present(monkeypatch, lumina)
     try:
         for bad in ("45", "-90", "360", "ninety", ""):
             res = client.post("/api/system/display", json={"rotation": bad})
@@ -579,6 +636,7 @@ def test_display_post_accepts_each_valid_rotation(client, monkeypatch):
     login(client)
     original_helper = lumina.DISPLAY_HELPER
     lumina.DISPLAY_HELPER = sys.executable  # any real, existing file
+    _mock_wlr_randr_present(monkeypatch, lumina)
     # os.geteuid() doesn't exist on Windows - this is the first test in the
     # suite to reach a helper's rc==0 branch (others short-circuit earlier),
     # so it's the first to hit this pre-existing, platform-specific call.
@@ -601,6 +659,7 @@ def test_display_post_accepts_an_integer_rotation(client, monkeypatch):
     login(client)
     original_helper = lumina.DISPLAY_HELPER
     lumina.DISPLAY_HELPER = sys.executable
+    _mock_wlr_randr_present(monkeypatch, lumina)
     monkeypatch.setattr(lumina.os, "geteuid", lambda: 1000, raising=False)
     monkeypatch.setattr(lumina, "run_cmd", lambda *a, **k: (0, "ok", ""))
     try:
@@ -616,6 +675,7 @@ def test_display_post_surfaces_a_helper_failure(client, monkeypatch):
     login(client)
     original_helper = lumina.DISPLAY_HELPER
     lumina.DISPLAY_HELPER = sys.executable
+    _mock_wlr_randr_present(monkeypatch, lumina)
     monkeypatch.setattr(lumina.os, "geteuid", lambda: 1000, raising=False)
     monkeypatch.setattr(lumina, "run_cmd", lambda *a, **k: (1, "", "display failed to restart"))
     try:

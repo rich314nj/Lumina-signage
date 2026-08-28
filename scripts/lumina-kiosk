@@ -52,9 +52,14 @@ fi
 apply_display_rotation() {
   [ -n "${WAYLAND_DISPLAY:-}" ] || return 0
 
+  # Strictly the FIRST line only, matching app.py's read_first_line() -
+  # both sides must parse this file identically, or GET /api/system/display
+  # could report a rotation this script would not actually apply. A stray
+  # ROTATION= appearing later in the file (hand-edited, or a future format
+  # change) must never be picked up by one side and not the other.
   local rotation=0 line value
   if [ -r "$DISPLAY_CONF" ]; then
-    line="$(grep -m1 '^ROTATION=' "$DISPLAY_CONF" 2>/dev/null || true)"
+    line="$(head -n1 "$DISPLAY_CONF" 2>/dev/null || true)"
     value="${line#ROTATION=}"
     case "$value" in
       0|90|180|270) rotation="$value" ;;
