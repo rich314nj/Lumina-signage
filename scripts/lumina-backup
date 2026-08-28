@@ -29,18 +29,30 @@ cmd_restore() {
   backup="$BACKUP_DIR/pre-restore-$stamp"
   mkdir -p "$backup"
 
+  # Once the service is stopped, any failure below must restart it before
+  # giving up — a failed restore should not ALSO leave a previously working
+  # device down. Plain die() (used above, before anything is touched) does
+  # not need this.
+  fail() { systemctl start lumina.service 2>/dev/null || true; die "$1"; }
+
   systemctl stop lumina.service 2>/dev/null || true
 
   # Back up what's about to be replaced before touching anything, so a bad
-  # restore (or a mistaken one) is itself recoverable.
-  [[ -f "$INSTALL_DIR/lumina.db" ]] && cp -a "$INSTALL_DIR/lumina.db" "$backup/" || true
-  [[ -d "$INSTALL_DIR/static/uploads" ]] && cp -a "$INSTALL_DIR/static/uploads" "$backup/uploads" || true
+  # restore (or a mistaken one) is itself recoverable. A failed backup here
+  # must stop the restore — `A && B || C` would silently swallow a failed
+  # cp and proceed to overwrite the live database with no way back.
+  if [[ -f "$INSTALL_DIR/lumina.db" ]]; then
+    cp -a "$INSTALL_DIR/lumina.db" "$backup/" || fail "Could not back up the current database."
+  fi
+  if [[ -d "$INSTALL_DIR/static/uploads" ]]; then
+    cp -a "$INSTALL_DIR/static/uploads" "$backup/uploads" || fail "Could not back up the current uploads."
+  fi
 
   workdir="$(mktemp -d)"
   # shellcheck disable=SC2064  # expand workdir now, not at trap time
   trap "rm -rf '$workdir'" EXIT
-  unzip -q "$archive" -d "$workdir" || die "archive is not a valid zip"
-  [[ -f "$workdir/lumina.db" ]] || die "archive does not contain lumina.db — not a LuminaShow backup"
+  unzip -q "$archive" -d "$workdir" || fail "archive is not a valid zip"
+  [[ -f "$workdir/lumina.db" ]] || fail "archive does not contain lumina.db — not a LuminaShow backup"
 
   rm -f "$INSTALL_DIR/lumina.db" "$INSTALL_DIR/lumina.db-wal" "$INSTALL_DIR/lumina.db-shm"
   cp "$workdir/lumina.db" "$INSTALL_DIR/lumina.db"
