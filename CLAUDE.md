@@ -240,6 +240,32 @@ Trust before features: the product's problem is reliability, not capability.
   in try/except that deletes the file on any failure. 6 new tests (154
   total). **Still needs the actual hardware acceptance test — not marked
   verified yet.**
+- **#24 follow-up review (1.11.2, same day)**: a second pass caught 3 more
+  real gaps before hardware testing began. (1) the CI-only test failure —
+  `test_backup_import_rejects_a_zip_with_no_database` created the real
+  `/var/lib/lumina/restore-uploads` on a CI runner with no permission to
+  do so; monkeypatched `RESTORE_STAGING_DIR` to `tmp_path` for that one
+  test. (2) the "double-copy" gap — by the time `request.files` is
+  touched, Werkzeug has already spooled the upload to a temp file on the
+  same filesystem, and `file.save()` then does a *second*, separate copy
+  rather than a rename, so `3GB free / 2GB upload / 200MB reserve` could
+  pass every existing check and still fill the disk mid-save. Fixed by
+  measuring the upload's actual size off the parsed stream and taking a
+  fresh disk reading immediately before `file.save()`, instead of trusting
+  the earlier Content-Length-based check again. (3) `DELETE`'s scan_token
+  covered every orphan a scan found, even though the UI only ever showed
+  the first 200 — added `ORPHAN_BATCH_LIMIT` (200) so the token can never
+  cover more than what's actually displayed; the System page now lists the
+  real filenames before cleanup, not just count/size. 8 more tests (156
+  total). Confirmed on GitHub Actions: Tests green on **both Python 3.11
+  and 3.12** (this is what the CI fix was for). **Known, deliberately
+  accepted limitation**: a specially-crafted API request with no
+  Content-Length at all can still reach `request.files` before the
+  pre-parse check can act (the post-parse check still protects
+  `file.save()` regardless) — not worth blocking the browser-only admin
+  UI over; if ever needed, the fix is a `411 Length Required` for
+  Content-Length-less multipart POSTs before touching `request.files`.
+  **Still not hardware-verified — that's the explicit next step.**
 
 ### Tier 5 — Features, in market-value order
 - #17 rotation/portrait (biggest market unlock)
