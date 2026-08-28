@@ -268,9 +268,9 @@ Trust before features: the product's problem is reliability, not capability.
 
 ### Needs hardware verification, then close
 - ~~#3~~ hardware-verified and closed.
-- #7 network management page — hostname/WiFi/status/scan all confirmed on
-  hardware; only the Ethernet→WiFi live-swap case (unplug cable while running)
-  is still untested. Keep open until that's exercised.
+- ~~#7~~ hardware-verified and closed — hostname/WiFi/status/scan confirmed
+  earlier; Ethernet↔WiFi live-swap (unplug/replug while running) confirmed
+  2026-08-28.
 - #42 (schedule playlist not saving) fixed in code 2026-08-28, awaiting
   hardware confirmation like everything else in this list.
 
