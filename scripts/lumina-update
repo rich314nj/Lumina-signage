@@ -155,7 +155,7 @@ cmd_apply() {
 # nor its grant is ever created.
 install_helpers() {
   local helper
-  for helper in lumina-net lumina-update lumina-power lumina-netwatch lumina-backup; do
+  for helper in lumina-net lumina-update lumina-power lumina-netwatch lumina-backup lumina-display; do
     [[ -f "$INSTALL_DIR/scripts/$helper" ]] || continue
     install -m 0755 "$INSTALL_DIR/scripts/$helper" "/usr/local/sbin/$helper"
     sed -i 's/\r$//' "/usr/local/sbin/$helper"
@@ -167,7 +167,7 @@ install_helpers() {
   fi
 
   # Only the helpers the application itself invokes get a sudoers grant.
-  for helper in lumina-net lumina-update lumina-power lumina-backup; do
+  for helper in lumina-net lumina-update lumina-power lumina-backup lumina-display; do
     [[ -f "/usr/local/sbin/$helper" ]] || continue
     printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/%s\n' \
       "$APP_USER" "$helper" > "/etc/sudoers.d/$helper"
@@ -176,6 +176,17 @@ install_helpers() {
 
   mkdir -p /var/lib/lumina/restore-uploads
   chown "$APP_USER:$APP_USER" /var/lib/lumina/restore-uploads
+
+  # A device imaged before #17 existed never got wlr-randr baked in, and
+  # --reprovision deliberately skips apt (it must not need internet). An
+  # update already needs internet to have reached this point at all, so
+  # this is the one place that's true — best-effort only: an offline
+  # device simply keeps rotation unavailable rather than failing the
+  # update, exactly like lumina-kiosk itself degrades when the binary is
+  # missing.
+  if ! command -v wlr-randr >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+    apt-get install -y wlr-randr >/dev/null 2>&1 || true
+  fi
 }
 
 # static/vendor is gitignored, so it is absent from the downloaded archive and

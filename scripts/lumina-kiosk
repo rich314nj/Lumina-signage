@@ -14,6 +14,10 @@ set -u
 # must never be given the chance to land on one.
 BOOTSTRAP_URL="${LUMINA_BOOTSTRAP_URL:-http://localhost/static/kiosk.html}"
 
+# Written by scripts/lumina-display (#17). World-readable, not sensitive -
+# never sourced, only ever read through the strict parse below.
+DISPLAY_CONF="${LUMINA_DISPLAY_CONF:-/etc/lumina/display.conf}"
+
 # Wait for Nginx to serve the bootstrap page before starting the browser.
 # This only needs the web server, not the application, so it clears quickly.
 for _ in $(seq 1 150); do
@@ -38,6 +42,54 @@ PLATFORM_ARGS=()
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then
   PLATFORM_ARGS+=(--ozone-platform=wayland)
 fi
+
+# Screen rotation (#17). Applied here, not from the privileged helper that
+# saves it, because only a process inside this Wayland session (inherited
+# from cage, our parent) can actually talk to the compositor. Every failure
+# path below falls through to starting Chromium unrotated rather than
+# blocking it — a rotation that doesn't apply is a much smaller problem
+# than a kiosk that never starts.
+apply_display_rotation() {
+  [ -n "${WAYLAND_DISPLAY:-}" ] || return 0
+
+  local rotation=0 line value
+  if [ -r "$DISPLAY_CONF" ]; then
+    line="$(grep -m1 '^ROTATION=' "$DISPLAY_CONF" 2>/dev/null || true)"
+    value="${line#ROTATION=}"
+    case "$value" in
+      0|90|180|270) rotation="$value" ;;
+      *) rotation=0 ;;  # missing, malformed, or unreadable - default to normal
+    esac
+  fi
+
+  # Normal orientation needs no transform call at all - also means a
+  # missing/invalid config file is completely inert, not just "safe".
+  [ "$rotation" != 0 ] || return 0
+
+  if ! command -v wlr-randr >/dev/null 2>&1; then
+    echo "lumina-kiosk: wlr-randr not installed, starting unrotated" >&2
+    return 0
+  fi
+
+  # The compositor's output-management interface may not be ready the
+  # instant cage starts, so retry briefly rather than giving up on one try.
+  local output=""
+  for _ in $(seq 1 5); do
+    output="$(wlr-randr 2>/dev/null | awk '/^[^ \t]/ { print $1; exit }')"
+    [ -n "$output" ] && break
+    sleep 1
+  done
+
+  if [ -z "$output" ]; then
+    echo "lumina-kiosk: no Wayland output detected, starting unrotated" >&2
+    return 0
+  fi
+
+  if ! wlr-randr --output "$output" --transform "$rotation" >/dev/null 2>&1; then
+    echo "lumina-kiosk: wlr-randr transform failed for output '$output', starting unrotated" >&2
+  fi
+}
+apply_display_rotation
 
 # --autoplay-policy is required for signage: without it Chromium blocks
 # autoplay with sound, so video and YouTube items never start on their own.

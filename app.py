@@ -1440,6 +1440,62 @@ def api_system_timezone_set():
     return jsonify({"success": True, "timezone": tz})
 
 
+# ── API: Display rotation (Admin) ─────────────────────────────────────────────
+
+DISPLAY_HELPER = "/usr/local/sbin/lumina-display"
+DISPLAY_CONF = "/etc/lumina/display.conf"
+VALID_ROTATIONS = ("0", "90", "180", "270")
+
+
+def current_display_rotation():
+    """Reads the same file scripts/lumina-kiosk applies on its own next
+    start — reading needs no privilege (the file is world-readable, same
+    exposure pattern as the timezone/clock reads); only writing it goes
+    through the helper. Never sourced - parsed and validated exactly like
+    lumina-kiosk parses it, and defaults to "0" the same way for a missing,
+    unreadable, or malformed file, so this always reflects what the kiosk
+    will actually do."""
+    text = read_first_line(DISPLAY_CONF) or ""
+    value = parse_kv(text).get("ROTATION", "0")
+    return value if value in VALID_ROTATIONS else "0"
+
+
+@app.route("/api/system/display")
+@login_required
+@role_required("admin")
+def api_system_display():
+    return jsonify({
+        "rotation": current_display_rotation(),
+        "supported": os.path.exists(DISPLAY_HELPER),
+    })
+
+
+@app.route("/api/system/display", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_system_display_set():
+    if not os.path.exists(DISPLAY_HELPER):
+        return jsonify({"error": "Display rotation is not available on this system"}), 503
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+    # Accept an int or a numeric string, but only ever pass one of the four
+    # known-good values on to the helper - no arbitrary argument reaches it.
+    rotation = str(data.get("rotation", "")).strip()
+    if rotation not in VALID_ROTATIONS:
+        return jsonify({
+            "error": f"rotation must be one of: {', '.join(VALID_ROTATIONS)}"
+        }), 400
+
+    if os.geteuid() == 0:
+        rc, out, err = run_cmd([DISPLAY_HELPER, "rotate", rotation], timeout=20)
+    else:
+        rc, out, err = run_cmd(["sudo", "-n", DISPLAY_HELPER, "rotate", rotation], timeout=20)
+    if rc != 0:
+        return jsonify({"error": err or out or "Could not change display rotation"}), 502
+    return jsonify({"success": True, "rotation": rotation})
+
+
 # ── API: Storage hygiene (Admin) ──────────────────────────────────────────────
 
 # A file must be at least this old before it can ever be reported or deleted

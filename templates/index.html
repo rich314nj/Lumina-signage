@@ -478,6 +478,21 @@ select option { background: var(--surface2); }
         </div>
 
         <div class="card" style="max-width:640px;margin-top:20px">
+          <div class="card-header"><span class="card-title">Display Orientation</span></div>
+          <div id="displayUnavailable" style="display:none;padding:16px 20px;font-size:13px;color:var(--text3)">
+            Display rotation is not available on this system.
+          </div>
+          <div id="displayBody" style="display:none">
+            <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px">
+              <div id="displayOptions" style="display:flex;gap:14px;flex-wrap:wrap"></div>
+              <div style="font-size:12px;color:var(--text3)">
+                Applying orientation restarts the display for a few seconds. Content and schedules are not affected. Landscape media on a portrait screen will letterbox until per-asset fit options ship separately (#21).
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="max-width:640px;margin-top:20px">
           <div class="card-header"><span class="card-title">Backup &amp; Restore</span></div>
           <div style="padding:16px 20px;display:flex;flex-direction:column;gap:16px">
             <div>
@@ -1662,10 +1677,78 @@ async function applyTimezone() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+const DISPLAY_ORIENTATIONS = [
+  { rotation: '0',   label: 'Landscape',          deg: '0°'   },
+  { rotation: '90',  label: 'Portrait',            deg: '90°'  },
+  { rotation: '180', label: 'Landscape inverted',  deg: '180°' },
+  { rotation: '270', label: 'Portrait inverted',   deg: '270°' },
+];
+
+// The preview is illustration only - a single marked rectangle, rotated by
+// CSS per option. It never touches the real player: actual rotation goes
+// through wlr-randr at the Wayland output layer (scripts/lumina-kiosk), not
+// CSS. The colored bar always marks the same physical edge of the
+// rectangle, so rotating it visually shows which edge becomes "top".
+function displayShapeSvg(rotation, selected) {
+  const stroke = selected ? 'var(--accent)' : 'var(--border)';
+  const bar = selected ? 'var(--accent)' : 'var(--text3)';
+  return `<svg width="56" height="56" viewBox="0 0 56 56">
+    <g transform="rotate(${rotation} 28 28)">
+      <rect x="10" y="16" width="36" height="24" rx="3" fill="none" stroke="${stroke}" stroke-width="2"/>
+      <rect x="10" y="16" width="36" height="5" rx="2" fill="${bar}"/>
+    </g>
+  </svg>`;
+}
+
+function renderDisplayOptions(current) {
+  const el = document.getElementById('displayOptions');
+  el.innerHTML = DISPLAY_ORIENTATIONS.map(o => {
+    const selected = o.rotation === current;
+    return `<button type="button" class="btn ${selected ? 'btn-primary' : 'btn-secondary'}"
+        style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 14px;min-width:96px"
+        onclick="applyDisplayRotation('${o.rotation}')" ${selected ? 'disabled' : ''}>
+      ${displayShapeSvg(o.rotation, selected)}
+      <span style="font-size:12px;font-weight:600">${esc(o.label)}</span>
+      <span style="font-size:11px;color:var(--text3)">${esc(o.deg)}</span>
+    </button>`;
+  }).join('');
+}
+
+async function loadDisplay() {
+  const unavail = document.getElementById('displayUnavailable');
+  const body = document.getElementById('displayBody');
+  try {
+    const d = await api('GET', '/api/system/display');
+    if (!d.supported) {
+      unavail.style.display = '';
+      body.style.display = 'none';
+      return;
+    }
+    unavail.style.display = 'none';
+    body.style.display = '';
+    renderDisplayOptions(d.rotation);
+  } catch (e) {
+    unavail.style.display = '';
+    unavail.textContent = e.message;
+    body.style.display = 'none';
+  }
+}
+
+async function applyDisplayRotation(rotation) {
+  const label = (DISPLAY_ORIENTATIONS.find(o => o.rotation === rotation) || {}).label || rotation;
+  if (!confirm(`Switch the display to ${label}?\n\nApplying orientation restarts the display for a few seconds. Content and schedules are not affected.`)) return;
+  try {
+    await api('POST', '/api/system/display', { rotation });
+    toast(`Display set to ${label}`, 'success');
+    await loadDisplay();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 async function loadSystem() {
   loadHealth();
   loadClock();
   loadTimezone();
+  loadDisplay();
   const msg = document.getElementById('sysMessage');
   const actions = document.getElementById('sysActions');
   try {

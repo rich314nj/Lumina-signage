@@ -510,6 +510,122 @@ def test_timezone_set_rejects_unknown_zone(client):
     assert res.status_code in (400, 503)
 
 
+# ── Display rotation (#17) ────────────────────────────────────────────────────
+
+def test_display_get_requires_admin(client):
+    login(client)
+    make_user(client, "ed11", "editor")
+    client.get("/logout")
+
+    login(client, "ed11", "secret123")
+    assert client.get("/api/system/display", json={}).status_code == 403
+
+
+def test_display_post_requires_admin(client):
+    login(client)
+    make_user(client, "ed12", "editor")
+    client.get("/logout")
+
+    login(client, "ed12", "secret123")
+    assert client.post("/api/system/display", json={"rotation": "90"}).status_code == 403
+
+
+def test_display_get_defaults_to_zero_with_no_config_file(client):
+    login(client)
+    body = client.get("/api/system/display").get_json()
+    assert body["rotation"] == "0"
+
+
+def test_display_get_defaults_to_zero_for_a_malformed_config(client, monkeypatch, tmp_path):
+    """A missing ROTATION= line, or a value outside {0,90,180,270}, must
+    never surface as anything but the safe default - this is the same
+    parse scripts/lumina-kiosk applies, so GET always reflects what the
+    kiosk will actually do (#17)."""
+    import app as lumina
+
+    login(client)
+    conf = tmp_path / "display.conf"
+    conf.write_text("ROTATION=45\n", encoding="utf-8")
+    monkeypatch.setattr(lumina, "DISPLAY_CONF", str(conf))
+    assert client.get("/api/system/display").get_json()["rotation"] == "0"
+
+    conf.write_text("something else entirely\n", encoding="utf-8")
+    assert client.get("/api/system/display").get_json()["rotation"] == "0"
+
+
+def test_display_post_is_refused_without_the_helper(client):
+    login(client)
+    res = client.post("/api/system/display", json={"rotation": "90"})
+    assert res.status_code == 503
+
+
+def test_display_post_rejects_an_invalid_rotation(client):
+    import app as lumina
+
+    login(client)
+    original_helper = lumina.DISPLAY_HELPER
+    lumina.DISPLAY_HELPER = sys.executable  # any real, existing file
+    try:
+        for bad in ("45", "-90", "360", "ninety", ""):
+            res = client.post("/api/system/display", json={"rotation": bad})
+            assert res.status_code == 400, bad
+    finally:
+        lumina.DISPLAY_HELPER = original_helper
+
+
+def test_display_post_accepts_each_valid_rotation(client, monkeypatch):
+    import app as lumina
+
+    login(client)
+    original_helper = lumina.DISPLAY_HELPER
+    lumina.DISPLAY_HELPER = sys.executable  # any real, existing file
+    # os.geteuid() doesn't exist on Windows - this is the first test in the
+    # suite to reach a helper's rc==0 branch (others short-circuit earlier),
+    # so it's the first to hit this pre-existing, platform-specific call.
+    monkeypatch.setattr(lumina.os, "geteuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(lumina, "run_cmd", lambda *a, **k: (0, "ok", ""))
+    try:
+        for rotation in ("0", "90", "180", "270"):
+            res = client.post("/api/system/display", json={"rotation": rotation})
+            assert res.status_code == 200, rotation
+            assert res.get_json()["rotation"] == rotation
+    finally:
+        lumina.DISPLAY_HELPER = original_helper
+
+
+def test_display_post_accepts_an_integer_rotation(client, monkeypatch):
+    """The admin UI posts a string, but nothing stops a raw int from
+    reaching this endpoint - it must be normalized the same way (#17)."""
+    import app as lumina
+
+    login(client)
+    original_helper = lumina.DISPLAY_HELPER
+    lumina.DISPLAY_HELPER = sys.executable
+    monkeypatch.setattr(lumina.os, "geteuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(lumina, "run_cmd", lambda *a, **k: (0, "ok", ""))
+    try:
+        res = client.post("/api/system/display", json={"rotation": 90})
+        assert res.status_code == 200
+    finally:
+        lumina.DISPLAY_HELPER = original_helper
+
+
+def test_display_post_surfaces_a_helper_failure(client, monkeypatch):
+    import app as lumina
+
+    login(client)
+    original_helper = lumina.DISPLAY_HELPER
+    lumina.DISPLAY_HELPER = sys.executable
+    monkeypatch.setattr(lumina.os, "geteuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(lumina, "run_cmd", lambda *a, **k: (1, "", "display failed to restart"))
+    try:
+        res = client.post("/api/system/display", json={"rotation": "90"})
+        assert res.status_code == 502
+        assert "display failed to restart" in res.get_json()["error"]
+    finally:
+        lumina.DISPLAY_HELPER = original_helper
+
+
 # ── Storage hygiene ───────────────────────────────────────────────────────────
 
 def _age_file(path, seconds_old):

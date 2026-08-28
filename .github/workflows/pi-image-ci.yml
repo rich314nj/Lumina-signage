@@ -91,6 +91,7 @@ jobs:
           shellcheck scripts/lumina-power
           shellcheck scripts/lumina-update
           shellcheck scripts/lumina-backup
+          shellcheck scripts/lumina-display
           shellcheck scripts/lumina-kiosk
           shellcheck scripts/lumina-netwatch
           shellcheck image/pi-gen/build-image.sh
