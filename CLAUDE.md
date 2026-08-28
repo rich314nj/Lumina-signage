@@ -208,11 +208,14 @@ Trust before features: the product's problem is reliability, not capability.
   detach-via-`systemd-run` pattern as `lumina-update`, previous state
   backed up before any restore. Hardware-verified: a real export→restore
   round-trip confirmed successful on device.
-- ~~#24 storage hygiene~~ — orphan file detection (report-then-delete, two
-  separate calls) correctly checks both `Asset.uri` *and* `Asset.thumbnail`;
-  uploads refused with `507` below a free-space floor. **Audited before
-  hardware verification (1.11.2, 2026-08-28)** — see the entry below; still
-  needs the actual hardware acceptance test before it can close.
+- ~~#24 storage hygiene~~ **— complete, hardware-verified 2026-08-28.**
+  Orphan file detection (report-then-delete, two separate calls) correctly
+  checks both `Asset.uri` *and* `Asset.thumbnail`; uploads refused with
+  `507` below a free-space floor; grace period, scan-token TOCTOU fix,
+  reserve-aware upload check, nginx request buffering, and batch-capped
+  cleanup all audited and hardened in 1.11.2 — see the entry below. Planted
+  orphan was correctly detected and cleaned on a real device; existing
+  assets, thumbnails, playlists, and playback all confirmed unaffected.
 - **Bug found while building #23**: `/api/health`'s disk report and the new
   backup export both hardcoded `BASE_DIR / "lumina.db"` instead of reading
   `SQLALCHEMY_DATABASE_URI` back — harmless until `DATABASE_URL` is actually
@@ -265,7 +268,8 @@ Trust before features: the product's problem is reliability, not capability.
   `file.save()` regardless) — not worth blocking the browser-only admin
   UI over; if ever needed, the fix is a `411 Length Required` for
   Content-Length-less multipart POSTs before touching `request.files`.
-  **Still not hardware-verified — that's the explicit next step.**
+  **Hardware-verified 2026-08-28** — planted-orphan acceptance test passed
+  on a real device (detected, cleaned, nothing else disturbed).
 
 ### Tier 5 — Features, in market-value order
 - #17 rotation/portrait (biggest market unlock)
@@ -323,14 +327,11 @@ Trust before features: the product's problem is reliability, not capability.
   #20 multi-zone layouts
 
 ### Hardware verification — outstanding
-Everything through the morning quick-wins batch (#42, #38 item 1, #16),
-#3, #7, #23 (backup/restore), and #11 (SD wear) is complete/closed
-(2026-08-27/28) — see the strikethrough notes above and in Tier 5. Only
-Tier 4's #24 remains:
-- #24 storage hygiene — code-audited and hardened in 1.11.2 (grace period,
-  scan-token TOCTOU fix, reserve-aware upload check, nginx request
-  buffering, failed-upload cleanup); orphan scan/clean/hardware acceptance
-  test still needs to actually run on a device before this closes.
+**All Tiers 0-4 are now hardware-verified and complete** (2026-08-27/28) —
+#24 (storage hygiene) was the last one, confirmed via a planted-orphan
+acceptance test on a real device. See the strikethrough notes above and in
+Tier 5 for the full list. Nothing outstanding here — next work is Tier 5
+(#17 rotation/portrait).
 
 ---
 
