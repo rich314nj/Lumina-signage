@@ -98,6 +98,10 @@ do not try to "fix" it by reintroducing qemu.
   user a Viewer. Worth grepping for on any UI change.
 - **A white kiosk screen means Chromium is not showing our page** — the player
   body is `#000`. White is a browser error/blank page.
+- **The Pi cannot scan for WiFi while acting as an access point.** One radio,
+  and the driver will not do both. Anything needing a network list while the
+  setup hotspot is up must scan and cache beforehand (see #38). A `Scan` that
+  returns nothing while connected over the hotspot is this, not a bug.
 
 ---
 
@@ -136,9 +140,14 @@ Trust before features: the product's problem is reliability, not capability.
   #24 storage hygiene
 
 ### Tier 5 — Features, in market-value order
-- #17 rotation/portrait (biggest market unlock) · #16 timezone UI ·
-  #18 asset date ranges · #25 playlist preview · #21 volume and fit ·
-  #19 display power (CEC)
+- #17 rotation/portrait (biggest market unlock)
+- **#38 zero-typing setup — WiFi QR code and captive portal.** Deepens the main
+  differentiator against Anthias. Start with the QR code: small, self-contained,
+  and most of the benefit. Note the single-radio constraint documented there —
+  the Pi cannot scan while acting as an access point, so any network list must
+  be scanned and cached *before* the hotspot goes up.
+- #16 timezone UI · #18 asset date ranges · #25 playlist preview ·
+  #21 volume and fit · #19 display power (CEC)
 
 ### Tier 6 — Architecture
 - #4 standalone player → #8 fleet management (v2.5), designed together ·
