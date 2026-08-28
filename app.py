@@ -6,9 +6,10 @@ Similar to Anthias/Screenly
 
 # Single source of truth for the version. Templates read it via the
 # app_version context processor; do not hardcode it in the UI.
-__version__ = "1.9.3"
+__version__ = "1.10.0"
 
 import os
+import io
 import re
 import json
 import uuid
@@ -25,11 +26,22 @@ from urllib.parse import urlparse, parse_qs
 
 from flask import (
     Flask, render_template, request, jsonify, redirect,
-    url_for, session
+    url_for, session, Response
 )
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
+
+try:
+    import qrcode
+    import qrcode.image.svg
+except ImportError:  # pragma: no cover - only missing on an unmigrated venv
+    qrcode = None
+
+try:
+    from zoneinfo import available_timezones
+except ImportError:  # pragma: no cover - zoneinfo is stdlib on Python 3.9+
+    available_timezones = None
 
 # ── App Configuration ──────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
@@ -887,6 +899,13 @@ def api_update_schedule(sch_id):
     data = get_json_dict()
     if not data:
         return jsonify({"error": "Invalid or missing JSON body"}), 400
+
+    # FIX #42: this endpoint silently dropped playlist_id, so changing which
+    # playlist a schedule points at never persisted. Mirror api_create_schedule.
+    new_playlist_id = data.get("playlist_id", s.playlist_id)
+    if "playlist_id" in data and not db.session.get(Playlist, new_playlist_id):
+        return jsonify({"error": "Valid playlist_id required"}), 400
+
     new_name = data.get("name", s.name)
     new_start_time = data.get("start_time", s.start_time)
     new_end_time = data.get("end_time", s.end_time)
@@ -916,6 +935,7 @@ def api_update_schedule(sch_id):
                 )
             }), 409
 
+    s.playlist_id = new_playlist_id
     s.name = new_name
     s.start_time = new_start_time
     s.end_time = new_end_time
@@ -1157,6 +1177,54 @@ def api_system_power():
     return jsonify({"success": True, "message": messages[action]})
 
 
+def current_timezone():
+    """Read the device's active timezone. Debian keeps the name in plain text
+    at /etc/timezone; fall back to resolving the /etc/localtime symlink for
+    systems that don't."""
+    tz = read_first_line("/etc/timezone")
+    if tz:
+        return tz
+    try:
+        real = os.path.realpath("/etc/localtime").replace("\\", "/")
+    except OSError:
+        return None
+    m = re.search(r"zoneinfo/(.+)$", real)
+    return m.group(1) if m else None
+
+
+@app.route("/api/system/timezone")
+@login_required
+@role_required("admin")
+def api_system_timezone():
+    """Devices shipped with no timezone set, so schedules fired at the wrong
+    local hour (#16) — the image now defaults one, this is the admin control."""
+    zones = sorted(available_timezones()) if available_timezones else []
+    return jsonify({
+        "current": current_timezone(),
+        "available": zones,
+        "supported": os.path.exists(NET_HELPER),
+    })
+
+
+@app.route("/api/system/timezone", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_system_timezone_set():
+    if not os.path.exists(NET_HELPER):
+        return jsonify({"error": "Timezone control is not available on this system"}), 503
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+    tz = data.get("timezone", "")
+    valid = available_timezones() if available_timezones else None
+    if not isinstance(tz, str) or not tz or (valid is not None and tz not in valid):
+        return jsonify({"error": "Unknown timezone"}), 400
+    rc, out, err = run_net_helper(["timezone", tz], timeout=30)
+    if rc != 0:
+        return jsonify({"error": err or out or "Could not set the timezone"}), 502
+    return jsonify({"success": True, "timezone": tz})
+
+
 # ── API: Updates (Admin) ──────────────────────────────────────────────────────
 
 UPDATE_HELPER = "/usr/local/sbin/lumina-update"
@@ -1320,6 +1388,61 @@ def api_device_info():
         "wired_link": wired_link_present(),
         "setup_ap": setup_ap_status(),
     })
+
+
+def wifi_qr_payload(ssid, password):
+    # Standard WIFI: QR payload (understood natively by iOS Camera and
+    # Android): backslash, semicolon, comma, and colon inside a field value
+    # must be backslash-escaped or they are read as field separators.
+    def esc(s):
+        return re.sub(r'([\\;,:"])', r"\\\1", s)
+    auth = "WPA" if password else "nopass"
+    payload = f"WIFI:T:{auth};S:{esc(ssid)};"
+    if password:
+        payload += f"P:{esc(password)};"
+    return payload + ";"
+
+
+def render_qr_svg(data):
+    img = qrcode.make(data, image_factory=qrcode.image.svg.SvgPathImage)
+    buf = io.BytesIO()
+    img.save(buf)
+    return buf.getvalue()
+
+
+@app.route("/api/device-info/qr/wifi.svg")
+def api_device_info_qr_wifi():
+    """QR code for the setup hotspot (#38) — join without typing SSID/password.
+
+    Encodes only the setup-hotspot credentials, which are already shown as
+    plain text on the same screen — this adds no new exposure.
+    """
+    if qrcode is None:
+        return jsonify({"error": "qrcode library not installed"}), 501
+    ap = setup_ap_status()
+    if not ap:
+        return jsonify({"error": "No setup hotspot is active"}), 404
+    svg = render_qr_svg(wifi_qr_payload(ap["ssid"], ap.get("password")))
+    return Response(svg, mimetype="image/svg+xml")
+
+
+@app.route("/api/device-info/qr/address.svg")
+def api_device_info_qr_address():
+    """QR code for the address to open next — the setup hotspot's portal
+    while it is active, otherwise the device's own address (#38).
+    """
+    if qrcode is None:
+        return jsonify({"error": "qrcode library not installed"}), 501
+    ap = setup_ap_status()
+    if ap:
+        url = ap["url"]
+    else:
+        addrs = local_ipv4_addresses()
+        if not addrs:
+            return jsonify({"error": "No address available yet"}), 404
+        url = f"http://{addrs[0]}"
+    svg = render_qr_svg(url)
+    return Response(svg, mimetype="image/svg+xml")
 
 
 @app.route("/api/network/status")

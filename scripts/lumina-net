@@ -84,6 +84,17 @@ case "$cmd" in
     echo "wireless country set to $cc"
     ;;
 
+  timezone)
+    # No image ever set TIMEZONE_DEFAULT before this control existed, so
+    # devices ran UTC and schedules fired at the wrong local hour (#16).
+    tz="${1:-}"
+    [[ "$tz" =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ ]] || die "invalid timezone format"
+    command -v timedatectl >/dev/null 2>&1 || die "timedatectl not available"
+    timedatectl list-timezones 2>/dev/null | grep -qxF "$tz" || die "unknown timezone: $tz"
+    timedatectl set-timezone "$tz"
+    echo "timezone set to $tz"
+    ;;
+
   hostname)
     name="${1:-}"
     valid_hostname "$name" || die "invalid hostname"
@@ -96,6 +107,6 @@ case "$cmd" in
     ;;
 
   *)
-    die "usage: lumina-net {wifi-rescan|wifi-connect|wifi-country|ip-dhcp|ip-static|hostname} ..."
+    die "usage: lumina-net {wifi-rescan|wifi-connect|wifi-country|ip-dhcp|ip-static|hostname|timezone} ..."
     ;;
 esac

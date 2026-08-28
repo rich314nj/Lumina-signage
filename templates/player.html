@@ -86,6 +86,30 @@ html, body {
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
 }
 
+/* QR codes (#38): scanning a phone camera at typical TV viewing distance
+   needs roughly a tenth of that distance in code width, so this sizes
+   generously — comfortable from a couch, still sane on a small monitor. A
+   QR code needs light quiet space around it to scan reliably, hence the
+   white background regardless of the dark page theme. */
+.setup-flex {
+  display: flex; align-items: center; justify-content: center;
+  gap: clamp(20px, 3.5vw, 48px); flex-wrap: wrap-reverse;
+}
+.setup-steps-col { flex: 1 1 320px; min-width: 280px; }
+.setup-qr-col {
+  display: flex; flex-direction: column; align-items: center;
+  gap: clamp(6px, 1vh, 12px); flex-shrink: 0;
+}
+.setup-qr-col img {
+  width: clamp(130px, 15vw, 220px); height: auto;
+  background: #fff; padding: clamp(8px, 1vw, 14px);
+  border-radius: 12px; display: block;
+}
+.setup-qr-caption {
+  font-size: clamp(11px, 1.2vw, 15px); color: #8899aa; text-align: center;
+  max-width: 220px; line-height: 1.3;
+}
+
 /* HUD */
 #hud {
   position: fixed; bottom: 0; left: 0; right: 0;
@@ -404,6 +428,22 @@ function step(n, html) {
   return `<div class="setup-step"><div class="setup-num">${n}</div><div class="setup-text">${html}</div></div>`;
 }
 
+// QR image: on error (qrcode library missing, or the credentials this SVG
+// was generated for have since changed) the block removes itself rather
+// than showing a broken-image icon — the text instructions beside it are
+// the source of truth either way.
+function qrBlock(src, caption) {
+  return `<div class="setup-qr-col">
+    <img src="${escHtml(src)}" alt="QR code" loading="eager"
+         onerror="this.closest('.setup-qr-col').remove()">
+    <div class="setup-qr-caption">${caption}</div>
+  </div>`;
+}
+
+function withQr(qrHtml, stepsHtml) {
+  return `<div class="setup-flex">${qrHtml}<div class="setup-steps-col">${stepsHtml}</div></div>`;
+}
+
 async function renderSetupScreen() {
   const title = document.getElementById('setupTitle');
   const subtitle = document.getElementById('setupSubtitle');
@@ -418,11 +458,19 @@ async function renderSetupScreen() {
     const ap = info.setup_ap;
     title.textContent = 'Connect this screen to WiFi';
     subtitle.textContent = 'This device is not on a network yet. Use a phone or laptop to set it up.';
-    card.innerHTML =
+    const steps =
       step(1, `Join the WiFi network <span class="setup-value">${escHtml(ap.ssid)}</span>` +
-              (ap.password ? ` using password <span class="setup-value">${escHtml(ap.password)}</span>` : '')) +
+              (ap.password ? ` using password <span class="setup-value">${escHtml(ap.password)}</span>` : '') +
+              ' — or scan the code') +
       step(2, `Open <span class="setup-value">${escHtml(ap.url)}</span> in a web browser`) +
       step(3, `Sign in, open <b>Network</b>, and choose your WiFi network`);
+    // Cache-bust: a QR generated for a previous device's credentials must
+    // never be served stale from the browser cache after a config change.
+    const qr = qrBlock(
+      '/api/device-info/qr/wifi.svg?t=' + Date.now(),
+      'Scan with a phone camera to join WiFi instantly'
+    );
+    card.innerHTML = withQr(qr, steps);
     foot.textContent = 'The screen updates automatically once the device joins your network.';
     return;
   }
@@ -431,11 +479,17 @@ async function renderSetupScreen() {
   if (addresses.length) {
     title.textContent = 'Ready for content';
     subtitle.textContent = 'This screen is connected and waiting for a playlist.';
-    card.innerHTML =
+    const steps =
       step(1, `On any device on the same network, open ` +
-              addresses.map(a => `<span class="setup-value">http://${escHtml(a)}</span>`).join(' or ')) +
+              addresses.map(a => `<span class="setup-value">http://${escHtml(a)}</span>`).join(' or ') +
+              ' — or scan the code') +
       step(2, `Sign in and upload images, video, or PDFs under <b>Assets</b>`) +
       step(3, `Create a playlist, mark it <b>Active</b>, and it starts playing here`);
+    const qr = qrBlock(
+      '/api/device-info/qr/address.svg?t=' + Date.now(),
+      'Scan to open the admin page on your phone'
+    );
+    card.innerHTML = withQr(qr, steps);
     foot.textContent = info.hostname
       ? `Device: ${info.hostname}  ·  also reachable at http://${info.hostname}.local`
       : '';

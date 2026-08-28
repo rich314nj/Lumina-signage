@@ -5,6 +5,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.10.0] — 2026-08-28
+
+Morning quick-wins batch: the four items queued from the previous session's
+agenda, all confirmed or diagnosed on hardware.
+
+### Fixed
+
+- **[High] Changing a schedule's playlist did not save** (#42) — `api_update_schedule` handled name, start/end time, days, and active state, but never read `playlist_id` at all. The API returned `200` and the UI reported success, so the schedule silently kept whichever playlist it was created with — reported from the field as the dropdown "reverting to the 1st playlist." Fixed to mirror `api_create_schedule`: an unknown playlist is rejected with `400`, an absent field leaves the existing playlist untouched, and a valid change now persists. Regression tests added.
+- **[Medium] The playlist editor was too narrow for its own content** (#40) — the **Add from Library** panel was clipped at the modal's edge, reachable only by an awkward horizontal scrollbar. The modal was `700px` wide but its two-column grid needed roughly `800px` at minimum, and the existing responsive rule watched the *viewport*, which never matched the actual constraint — the *modal* — regardless of window size. The playlist editor is now a `.modal-lg` (`min(1040px, 94vw)`, resizable via the corner handle) with `minmax(0, 1fr)` on the left column so it can actually shrink, and a `@container` query that stacks the two columns based on the modal's own width rather than the viewport.
+
+### Added
+
+- **WiFi QR code on the setup screen** (#38) — the on-screen setup instructions now include a scannable QR code alongside the existing text: a standard `WIFI:` payload for the setup hotspot, and the device address for the "ready for content" screen. Either state degrades cleanly — the code disappears rather than showing a broken image if it can't be generated. Rendered server-side as SVG via the `qrcode` library (no Pillow, no client-side dependency, ~5 KB), served from two small unauthenticated endpoints matching `/api/device-info`'s existing exposure. Item 1 only, as scoped in the issue — the captive portal remains for later.
+- **Timezone control on the System page** (#16) — devices previously had no way to change the timezone without SSH; the image default fixed in 1.6.1 covered new installs but nothing let an admin correct it afterward. A new **Date & Time** card lists every IANA zone (via Python's stdlib `zoneinfo`) and applies the change through the existing `lumina-net` helper (`timezone` action, validated against `timedatectl list-timezones` on the device before being applied). Degrades to a clear "not available" notice where the helper is absent, matching every other System-page control.
+
+---
+
 ## [1.9.3] — 2026-08-27
 
 The update path was confirmed working on hardware (1.9.1 → 1.9.2), which

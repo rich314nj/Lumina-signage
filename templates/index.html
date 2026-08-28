@@ -114,7 +114,15 @@ tbody tr:last-child td { border-bottom: none; }
 .upload-icon { font-size: 40px; margin-bottom: 12px; }
 .upload-title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
 .upload-hint { font-size: 12px; color: var(--text2); font-family: var(--font-mono); }
-.playlist-split { display: grid; grid-template-columns: 1fr 380px; gap: 20px; }
+/* FIX #40: minmax(0, 1fr) lets the left column actually shrink below its
+   content (plain 1fr does not), and the container query below responds to
+   the modal's own width rather than the viewport — the modal stays a fixed
+   size regardless of window width, so a viewport breakpoint here never fires
+   at the width that actually matters. */
+.playlist-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); gap: 20px; }
+@container (max-width: 640px) {
+  .playlist-split { grid-template-columns: 1fr; }
+}
 .playlist-list { display: flex; flex-direction: column; gap: 10px; }
 .playlist-item-row { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; cursor: grab; }
 .playlist-item-row:active { cursor: grabbing; }
@@ -148,7 +156,11 @@ select option { background: var(--surface2); }
 .day-btn.selected { background: var(--accent-dim); color: var(--accent); border-color: rgba(232,114,28,0.3); }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; pointer-events: none; transition: var(--transition); }
 .modal-overlay.open { opacity: 1; pointer-events: all; }
-.modal { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg); padding: 28px; width: 100%; max-width: 520px; transform: scale(0.96) translateY(8px); transition: var(--transition); max-height: 90vh; overflow-y: auto; }
+.modal { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg); padding: 28px; width: 100%; max-width: 520px; transform: scale(0.96) translateY(8px); transition: var(--transition); max-height: 90vh; overflow-y: auto; container-type: inline-size; }
+/* Wide modals (the playlist editor) get room for their two-column layout and
+   a resize handle, since dragging one edit modal bigger is more useful here
+   than in a short form. */
+.modal-lg { max-width: min(1040px, 94vw); overflow: auto; resize: both; }
 .modal-overlay.open .modal { transform: scale(1) translateY(0); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
 .modal-title { font-size: 18px; font-weight: 800; }
@@ -394,6 +406,28 @@ select option { background: var(--surface2); }
         </div>
 
         <div class="card" style="max-width:640px;margin-top:20px">
+          <div class="card-header"><span class="card-title">Date &amp; Time</span></div>
+          <div id="tzUnavailable" style="display:none;padding:16px 20px;font-size:13px;color:var(--text3)">
+            Timezone control is not available on this system.
+          </div>
+          <div id="tzBody" style="display:none">
+            <div style="padding:16px 20px;display:flex;flex-direction:column;gap:12px">
+              <div style="font-size:12px;color:var(--text3)">
+                Schedules run on this device's local time. If a schedule fires at the wrong hour, this is usually why.
+              </div>
+              <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+                <div class="form-group" style="flex:1;max-width:340px;min-width:220px">
+                  <label>Timezone</label>
+                  <select id="tzSelect"></select>
+                </div>
+                <button class="btn btn-primary" onclick="applyTimezone()">Apply</button>
+              </div>
+              <div id="tzCurrentNote" style="font-size:11px;color:var(--text3);font-family:var(--font-mono)"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="max-width:640px;margin-top:20px">
           <div class="card-header"><span class="card-title">Health</span></div>
           <div id="healthBody" style="padding:16px 20px;font-size:13px;color:var(--text3)">Loading…</div>
         </div>
@@ -459,7 +493,7 @@ select option { background: var(--surface2); }
 
 <!-- Playlist Modal -->
 <div class="modal-overlay" id="playlistModal">
-  <div class="modal" style="max-width:700px">
+  <div class="modal modal-lg">
     <div class="modal-header"><div class="modal-title" id="playlistModalTitle">Edit Playlist</div><button class="modal-close" onclick="closeModal('playlistModal')">✕</button></div>
     <input type="hidden" id="editPlaylistId">
     <div class="form-grid" style="margin-bottom:20px">
@@ -1380,8 +1414,45 @@ async function devicePower(action) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+async function loadTimezone() {
+  const unavail = document.getElementById('tzUnavailable');
+  const body = document.getElementById('tzBody');
+  try {
+    const tz = await api('GET', '/api/system/timezone');
+    if (!tz.supported) {
+      unavail.style.display = '';
+      body.style.display = 'none';
+      return;
+    }
+    unavail.style.display = 'none';
+    body.style.display = '';
+    const select = document.getElementById('tzSelect');
+    const zones = tz.available && tz.available.length ? tz.available : (tz.current ? [tz.current] : []);
+    select.innerHTML = zones.map(z => `<option value="${esc(z)}">${esc(z)}</option>`).join('');
+    if (tz.current) select.value = tz.current;
+    document.getElementById('tzCurrentNote').textContent =
+      tz.current ? `Currently: ${tz.current}` : 'Current timezone could not be determined.';
+  } catch (e) {
+    unavail.style.display = '';
+    unavail.textContent = e.message;
+    body.style.display = 'none';
+  }
+}
+
+async function applyTimezone() {
+  const tz = document.getElementById('tzSelect').value;
+  if (!tz) return;
+  if (!confirm(`Set the device timezone to ${tz}?\n\nSchedule times are interpreted in this timezone.`)) return;
+  try {
+    await api('POST', '/api/system/timezone', { timezone: tz });
+    toast(`Timezone set to ${tz}`, 'success');
+    await loadTimezone();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 async function loadSystem() {
   loadHealth();
+  loadTimezone();
   const msg = document.getElementById('sysMessage');
   const actions = document.getElementById('sysActions');
   try {

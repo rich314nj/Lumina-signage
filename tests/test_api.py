@@ -43,6 +43,38 @@ def test_device_info_is_reachable_without_login(client):
     assert "hostname" in res.get_json()
 
 
+def test_wifi_qr_absent_without_a_setup_hotspot(client):
+    # No nmcli / setup hotspot on a dev machine, so nothing to encode.
+    res = client.get("/api/device-info/qr/wifi.svg")
+    assert res.status_code == 404
+
+
+def test_address_qr_is_reachable_without_login(client):
+    # /api/device-info always finds a fallback address on a real socket
+    # (see local_ipv4_addresses), so this should render even off-device.
+    res = client.get("/api/device-info/qr/address.svg")
+    assert res.status_code == 200
+    assert res.mimetype == "image/svg+xml"
+    assert b"<svg" in res.data
+
+
+def test_wifi_qr_payload_escapes_special_characters():
+    import app as lumina
+    payload = lumina.wifi_qr_payload('Guest;Wifi,Test:"Name"\\', "p:a,s;s\\word")
+    # Every WIFI:-reserved character inside a field value must be escaped so
+    # a camera reads it as data, not as the next field separator.
+    assert payload == (
+        'WIFI:T:WPA;S:Guest\\;Wifi\\,Test\\:\\"Name\\"\\\\;'
+        'P:p\\:a\\,s\\;s\\\\word;;'
+    )
+
+
+def test_wifi_qr_payload_open_network_has_no_password_field():
+    import app as lumina
+    payload = lumina.wifi_qr_payload("OpenNet", None)
+    assert payload == "WIFI:T:nopass;S:OpenNet;;"
+
+
 # ── Role enforcement ──────────────────────────────────────────────────────────
 
 def test_editor_cannot_manage_users(client):
@@ -188,6 +220,52 @@ def test_schedule_requires_an_existing_playlist(client):
     assert res.status_code == 400
 
 
+def test_updating_a_schedules_playlist_persists(client):
+    """Regression test for #42 - playlist_id was silently dropped on update."""
+    login(client)
+    pid_a = _playlist(client, "A")
+    pid_b = _playlist(client, "B")
+    sid = client.post("/api/schedules", json={
+        "playlist_id": pid_a, "name": "swap-me", "start_time": "09:00",
+        "end_time": "17:00", "days": "mon"}).get_json()["id"]
+
+    res = client.put(f"/api/schedules/{sid}", json={"playlist_id": pid_b})
+    assert res.status_code == 200
+    assert res.get_json()["playlist_id"] == pid_b
+
+    fetched = client.get("/api/schedules").get_json()
+    updated = next(s for s in fetched if s["id"] == sid)
+    assert updated["playlist_id"] == pid_b
+    assert updated["playlist_name"] == "B"
+
+
+def test_updating_schedule_with_unknown_playlist_is_rejected(client):
+    login(client)
+    pid = _playlist(client)
+    sid = client.post("/api/schedules", json={
+        "playlist_id": pid, "start_time": "09:00", "end_time": "17:00",
+        "days": "mon"}).get_json()["id"]
+
+    res = client.put(f"/api/schedules/{sid}",
+                     json={"playlist_id": "does-not-exist"})
+    assert res.status_code == 400
+    # And the original playlist must be untouched.
+    assert client.get("/api/schedules").get_json()[0]["playlist_id"] == pid
+
+
+def test_updating_schedule_without_playlist_id_leaves_it_unchanged(client):
+    login(client)
+    pid = _playlist(client)
+    sid = client.post("/api/schedules", json={
+        "playlist_id": pid, "start_time": "09:00", "end_time": "17:00",
+        "days": "mon"}).get_json()["id"]
+
+    res = client.put(f"/api/schedules/{sid}", json={"name": "renamed only"})
+    assert res.status_code == 200
+    assert res.get_json()["playlist_id"] == pid
+    assert res.get_json()["name"] == "renamed only"
+
+
 # ── Assets and playlists ──────────────────────────────────────────────────────
 
 def test_youtube_url_is_classified_and_gets_a_thumbnail(client):
@@ -299,6 +377,39 @@ def test_power_requires_admin(client):
     login(client, "ed5", "secret123")
     assert client.post("/api/system/power",
                        json={"action": "reboot"}).status_code == 403
+
+
+# ── Timezone ──────────────────────────────────────────────────────────────────
+
+def test_timezone_requires_admin(client):
+    login(client)
+    make_user(client, "ed6", "editor")
+    client.get("/logout")
+
+    login(client, "ed6", "secret123")
+    assert client.get("/api/system/timezone", json={}).status_code == 403
+
+
+def test_timezone_lists_real_zones(client):
+    login(client)
+    body = client.get("/api/system/timezone").get_json()
+    assert "America/New_York" in body["available"]
+    assert "Europe/London" in body["available"]
+
+
+def test_timezone_set_is_refused_without_the_helper(client):
+    # No lumina-net on a dev machine, so this must degrade rather than crash.
+    login(client)
+    res = client.post("/api/system/timezone", json={"timezone": "America/New_York"})
+    assert res.status_code == 503
+
+
+def test_timezone_set_rejects_unknown_zone(client):
+    login(client)
+    res = client.post("/api/system/timezone", json={"timezone": "Not/AZone"})
+    # 400 if the helper is present and validation runs, 503 if it is not
+    # (dev machine) - either way it must not be accepted as valid.
+    assert res.status_code in (400, 503)
 
 
 # ── Updates ───────────────────────────────────────────────────────────────────

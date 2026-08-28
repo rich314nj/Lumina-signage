@@ -450,7 +450,11 @@ curl -b cookies.txt -X PUT http://localhost/api/playlists/<id> \
 | POST | `/api/update/apply` | Start an update (returns immediately; poll status) |
 | GET | `/api/health` | Services, disk, CPU temperature, undervoltage, player heartbeat |
 | POST | `/api/system/power` | `{"action": "restart-display" \| "reboot" \| "shutdown"}` |
+| GET | `/api/system/timezone` | Current timezone and the full IANA zone list |
+| POST | `/api/system/timezone` | `{"timezone": "America/New_York"}` |
 | POST | `/api/player/heartbeat` | Reported by the player; unauthenticated like `/api/current-playlist` |
+| GET | `/api/device-info/qr/wifi.svg` | QR code for the setup hotspot; unauthenticated, `404` when no hotspot is active |
+| GET | `/api/device-info/qr/address.svg` | QR code for the device's admin address; unauthenticated |
 
 ### Network (Admin only, requires NetworkManager)
 

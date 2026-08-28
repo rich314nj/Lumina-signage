@@ -4,7 +4,7 @@ Self-hosted digital signage for Raspberry Pi 4/5. Positioned as a direct
 replacement for Anthias/Screenly OSE, with the differentiator being **setup and
 network management that a non-technical person can do without a keyboard**.
 
-Repo: `rich314nj/Lumina-signage` · Current version: **1.9.0**
+Repo: `rich314nj/Lumina-signage` · Current version: **1.10.0**
 
 ---
 
@@ -126,52 +126,84 @@ do not try to "fix" it by reintroducing qemu.
 Trust before features: the product's problem is reliability, not capability.
 
 ### Tier 0 — Blockers ✅ done in 1.7.0
-- ~~#13 playlist restarted from item 1 every 5 minutes~~
-- ~~#29 kiosk white screen with no recovery~~ (bootstrap page; **root cause still
-  unconfirmed — needs `journalctl -u lumina-kiosk` from the affected device**)
+- ~~#13 playlist restarted from item 1 every 5 minutes~~ — hardware-verified
+- ~~#29 kiosk white screen with no recovery~~ — bootstrap page shipped (1.7.0);
+  **actual root cause found and fixed in 1.9.2**, see Tier 2
 
-### Tier 1 — Confirmed quick fixes ✅ done in 1.7.0 / 1.7.1
+### Tier 1 — Confirmed quick fixes ✅ done in 1.7.0 / 1.7.1, hardware-verified
 - ~~#14 transient API failure blanked a working screen~~
 - ~~#30 content changes took up to 5 minutes to appear~~
 - ~~#26 user role never changed (duplicate `userRole` id)~~
 - ~~#27 clicking the drop zone opened the picker but never uploaded~~
 - ~~#31 thumbnails in the Add-from-Library picker~~
 
-### UI polish backlog (small, do opportunistically)
-- **#40 playlist editor is too narrow** — the Add from Library panel is clipped;
-  the modal is 700px but its grid needs ~800px. Note the real lesson: the
-  breakpoint is keyed to the *viewport* while the constraint is the *modal*, so
-  a container query is the correct fix.
+### UI polish backlog ✅ #40 done in 1.10.0, rest opportunistic
+- ~~**#40 playlist editor is too narrow**~~ — fixed with a `@container` query on
+  `.playlist-split` (the modal itself, `.modal-lg`, now sets
+  `container-type: inline-size` via the base `.modal` rule) rather than another
+  viewport breakpoint — the lesson that mattered: the constraint was the
+  *modal's* width, not the *viewport's*, so a `@media` rule could never fire at
+  the right size regardless of window width.
 - #39 follow-up — the playlist editor's drag-to-reorder, the asset grid, and the
   schedule day picker have not been reviewed at phone width.
 
-### Tier 2 — Make failures survivable ✅ done in 1.9.0
-- ~~#32 reboot / shutdown / restart-display controls~~ — on the System page
-- ~~#10 health reporting + player heartbeat~~
+### Tier 2 — Make failures survivable ✅ done, hardware-verified
+- ~~#32 reboot / shutdown / restart-display controls~~ — UI shipped 1.9.0, but the
+  kiosk unit had a real bug the controls exposed: `StandardInput=tty-fail` does
+  not fail when `getty@tty1` already owns the console — it starts anyway
+  without becoming the active VT, so the screen showed boot text while the
+  service reported healthy. Root cause found via
+  `systemctl stop getty@tty1 && systemctl restart lumina-kiosk` (which is now
+  what `Conflicts=getty@tty1.service` automates), fixed in **1.9.2**, all three
+  controls confirmed working on hardware.
+- ~~#10 health reporting + player heartbeat~~ — hardware-verified; heartbeat
+  correctly showed the playing filename during the #32 diagnosis
 - ~~#15 vendor PDF.js locally~~ — downloaded by the installers into
   `static/vendor/pdfjs/` (gitignored), player falls back to the CDN if absent
 - ~~#28 remainder~~ — Network page explains a blocked radio and offers a
-  country field
+  country field; hardware-verified (WiFi scan, connect, and status all working)
 
-### Tier 3 — Lock it in, then make it shippable ✅ done in 1.8.0
-- ~~#22 test suite~~ — 106 tests in `tests/`, CI on 3.11 and 3.12
-- ~~#9 update path~~ — `scripts/lumina-update` + the System page. **Untested on
-  real hardware**: the first genuine test is updating a device from 1.8.0 to
-  whatever ships next. Until that has happened once, treat it as unproven.
+### Tier 3 — Lock it in, then make it shippable ✅ done, hardware-verified
+- ~~#22 test suite~~ — 125 tests in `tests/`, CI on 3.11 and 3.12
+- ~~#9 update path~~ — `scripts/lumina-update` + the System page.
+  **Confirmed on hardware twice**: 1.9.1→1.9.2 and 1.9.2→1.9.3. The second
+  update caught a real gap (#41, fixed in 1.9.3): systemd units and nginx
+  config are *generated* by `install_rpi.sh`, not shipped as files, so an
+  update never refreshed them — a device could run new code under an old unit
+  while reporting the new version. `install_rpi.sh --reprovision` fixes this;
+  `lumina-update` calls it after sync and again on rollback. **Rule: anything
+  the installer generates is invisible to updates — check the update path
+  when changing a generated file.**
 
-### Tier 4 — Hardening
+### Tier 4 — Hardening ← next up
 - #11 SD card wear · #12 per-device credentials · #23 backup/restore ·
   #24 storage hygiene
+- **#11 direction from the project owner**: responsiveness and card life are
+  NOT a trade-off — polling writes nothing, *logging* it does (nginx +
+  gunicorn both log every request; ~10 req/min from polling + heartbeat is
+  ~29,000 log writes/day). Fix logging first (silence access logs for poll
+  endpoints, cap the journal) and 15s polling can stay as-is; SSE is the real
+  long-term improvement (nginx already has `proxy_buffering off`; needs
+  threaded gunicorn workers, not sync). Full analysis on the issue.
 
 ### Tier 5 — Features, in market-value order
 - #17 rotation/portrait (biggest market unlock)
-- **#38 zero-typing setup — WiFi QR code and captive portal.** Deepens the main
-  differentiator against Anthias. Start with the QR code: small, self-contained,
-  and most of the benefit. Note the single-radio constraint documented there —
-  the Pi cannot scan while acting as an access point, so any network list must
-  be scanned and cached *before* the hotspot goes up.
-- #16 timezone UI · #18 asset date ranges · #25 playlist preview ·
-  #21 volume and fit · #19 display power (CEC)
+- **#38 zero-typing setup.** Item 1 (WiFi QR code) ✅ **done in 1.10.0** —
+  server-side SVG via the `qrcode` lib (no Pillow), two unauthenticated
+  endpoints (`/api/device-info/qr/wifi.svg`, `/api/device-info/qr/address.svg`)
+  matching `/api/device-info`'s exposure, rendered beside the existing text
+  instructions on both setup-screen states. **Remaining**: the captive portal
+  (item 3) and the network-picker (item 4) — note the single-radio
+  constraint documented there: the Pi cannot scan while acting as an access
+  point, so any network list must be scanned and cached *before* the hotspot
+  goes up.
+- ~~#16 timezone UI~~ ✅ **done in 1.10.0** — Date & Time card on the System
+  page, backed by a new `timezone` action in `scripts/lumina-net` (validates
+  against `timedatectl list-timezones` on-device; the zone list itself comes
+  from Python's stdlib `zoneinfo`, so it works even where `timedatectl` is
+  absent for listing purposes)
+- #18 asset date ranges · #25 playlist preview · #21 volume and fit ·
+  #19 display power (CEC)
 
 ### Pre-release polish — do last, once the UI has stopped moving
 - **#43 in-app help** — a help icon opening built-in end-user documentation.
@@ -185,8 +217,12 @@ Trust before features: the product's problem is reliability, not capability.
   #20 multi-zone layouts
 
 ### Needs hardware verification, then close
-- #3 kiosk on boot and #7 network management page — both predate the v1.6
-  appliance rework, so re-verify on a current image rather than assuming.
+- ~~#3~~ hardware-verified and closed.
+- #7 network management page — hostname/WiFi/status/scan all confirmed on
+  hardware; only the Ethernet→WiFi live-swap case (unplug cable while running)
+  is still untested. Keep open until that's exercised.
+- #42 (schedule playlist not saving) fixed in code 2026-08-28, awaiting
+  hardware confirmation like everything else in this list.
 
 ---
 
