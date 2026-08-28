@@ -173,6 +173,13 @@ Trust before features: the product's problem is reliability, not capability.
 - #16 timezone UI · #18 asset date ranges · #25 playlist preview ·
   #21 volume and fit · #19 display power (CEC)
 
+### Pre-release polish — do last, once the UI has stopped moving
+- **#43 in-app help** — a help icon opening built-in end-user documentation.
+  Must be **bundled locally**, never an external link: the appliance is offline
+  by design, and help is most needed exactly where there is no connectivity
+  (same trap as #15). Source material already exists in the operator guide
+  written during development.
+
 ### Tier 6 — Architecture
 - #4 standalone player → #8 fleet management (v2.5), designed together ·
   #20 multi-zone layouts
