@@ -5,6 +5,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.11.2] — 2026-08-28
+
+Pre-hardware-verification audit of #24 (storage hygiene), requested before
+running orphan cleanup against real device storage. Confirmed several real
+gaps beyond what the tests covered:
+
+- **Orphan grace period**: `find_orphaned_upload_files()` previously flagged
+  any unreferenced file immediately. A file must now be older than
+  `ORPHAN_GRACE_SECONDS` (15 minutes) before it can ever be reported or
+  deleted, closing the race between a file landing on disk and its Asset
+  row's commit landing a moment later.
+- **Scan/delete TOCTOU**: `DELETE /api/storage/orphans` used to re-scan from
+  scratch, unrelated to whatever the preceding `GET` showed. It now requires
+  a `scan_token` from that `GET`, and only deletes the intersection of that
+  scan's candidates, a fresh re-scan, and files verified to resolve inside
+  `UPLOAD_FOLDER` — a file created after the scan can never be swept by it.
+- **Disk-space math**: the upload check compared free space only against a
+  fixed floor, so a large-enough upload could still fill the disk out from
+  under a smaller reserve. It now also weighs the declared `Content-Length`
+  against the reserve, checked *before* `request.files` is touched (which
+  otherwise forces Werkzeug to fully parse — and, for a big file, spool to
+  disk — before Flask code runs at all).
+- **Nginx request buffering**: by default nginx buffers an entire upload to
+  its own disk-backed temp file before forwarding it upstream. A dedicated
+  `/api/assets` location now disables that (`proxy_request_buffering off`),
+  removing one extra full copy of a large upload from the SD card.
+- **Failed-upload cleanup**: if the database write failed after a file was
+  already saved (e.g. a locked database), the file had no cleanup path and
+  became a permanent orphan. `api_create_asset()` now cleans up the saved
+  file (and thumbnail) on any failure and returns a clean `500`.
+
+6 new regression tests (154 total, up from 148).
+
 ## [1.11.1] — 2026-08-28
 
 Bugfix: the #12 hardening (random per-device admin password instead of a

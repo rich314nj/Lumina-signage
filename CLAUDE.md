@@ -4,7 +4,7 @@ Self-hosted digital signage for Raspberry Pi 4/5. Positioned as a direct
 replacement for Anthias/Screenly OSE, with the differentiator being **setup and
 network management that a non-technical person can do without a keyboard**.
 
-Repo: `rich314nj/Lumina-signage` · Current version: **1.11.1**
+Repo: `rich314nj/Lumina-signage` · Current version: **1.11.2**
 
 ---
 
@@ -184,15 +184,16 @@ Trust before features: the product's problem is reliability, not capability.
   the installer generates is invisible to updates — check the update path
   when changing a generated file.**
 
-### Tier 4 — Hardening ✅ done in 1.11.0 (bugfix 1.11.1)
-- ~~#11 SD card wear~~ — the fix was logging, not polling frequency: nginx
-  `access_log off` for the polling endpoints, gunicorn access log dropped
-  entirely, journald capped (persistent, not volatile — `journalctl` on a
-  past boot is this project's standard field-diagnosis tool), SQLite WAL +
-  `synchronous=NORMAL`. 15s polling untouched. **Still open, deliberately
-  deferred**: SSE as the real long-term fix (nginx already has
-  `proxy_buffering off`; needs threaded gunicorn workers, not sync) — revisit
-  if #11's logging fix ever proves insufficient in the field.
+### Tier 4 — Hardening ✅ done in 1.11.0 (bugfixes 1.11.1, 1.11.2)
+- ~~#11 SD card wear~~ **— complete, closed 2026-08-28.** The fix was
+  logging, not polling frequency: nginx `access_log off` for the polling
+  endpoints, gunicorn access log dropped entirely, journald capped
+  (persistent, not volatile — `journalctl` on a past boot is this project's
+  standard field-diagnosis tool), SQLite WAL + `synchronous=NORMAL`. 15s
+  polling untouched. **Deliberately not built**: SSE as a further long-term
+  reduction (nginx already has `proxy_buffering off`; would need threaded
+  gunicorn workers, not sync) — revisit only if SD wear ever resurfaces as
+  an actual field problem; the logging fix alone was judged sufficient.
 - ~~#12 per-device credentials~~ — random admin password generated per fresh
   install, shown once on the setup screen, deleted the moment any login
   succeeds (`/etc/lumina/first-boot-password`, same exposure pattern as the
@@ -202,15 +203,16 @@ Trust before features: the product's problem is reliability, not capability.
   **1.11.0 shipped without a way to actually see the password anywhere in
   the UI — fixed in 1.11.1, hardware-verified 2026-08-28** (setup screen
   correctly showed `admin / fee17036b0c9` on device `lumina-ci`).
-- ~~#23 backup/restore~~ — export/import on the System page, new
-  `scripts/lumina-backup` helper using the same detach-via-`systemd-run`
-  pattern as `lumina-update`, previous state backed up before any restore.
-  **Hardware-verified 2026-08-28** — real export→restore round-trip
-  confirmed successful on device.
+- ~~#23 backup/restore~~ **— complete, closed 2026-08-28.** Export/import on
+  the System page, new `scripts/lumina-backup` helper using the same
+  detach-via-`systemd-run` pattern as `lumina-update`, previous state
+  backed up before any restore. Hardware-verified: a real export→restore
+  round-trip confirmed successful on device.
 - ~~#24 storage hygiene~~ — orphan file detection (report-then-delete, two
   separate calls) correctly checks both `Asset.uri` *and* `Asset.thumbnail`;
-  uploads refused with `507` below a free-space floor. **Not yet
-  hardware-verified.**
+  uploads refused with `507` below a free-space floor. **Audited before
+  hardware verification (1.11.2, 2026-08-28)** — see the entry below; still
+  needs the actual hardware acceptance test before it can close.
 - **Bug found while building #23**: `/api/health`'s disk report and the new
   backup export both hardcoded `BASE_DIR / "lumina.db"` instead of reading
   `SQLALCHEMY_DATABASE_URI` back — harmless until `DATABASE_URL` is actually
@@ -218,6 +220,26 @@ Trust before features: the product's problem is reliability, not capability.
   support), at which point both would have silently operated on the wrong,
   empty file. Fixed via a shared `database_file_path()` helper. **Grep for
   `BASE_DIR / "lumina.db"` before adding a third call site.**
+- **#24 pre-hardware-verification audit (1.11.2)**: requested before running
+  orphan cleanup against real device storage. Found and fixed 5 real gaps
+  the original implementation and its tests hadn't caught: (1) no grace
+  period — `find_orphaned_upload_files()` could flag a file the instant it
+  landed, before its `Asset` row's commit; fixed with `ORPHAN_GRACE_SECONDS`
+  (15 min). (2) TOCTOU between `GET` and `DELETE` — `DELETE` used to
+  re-scan from scratch, unrelated to what the admin reviewed; fixed with a
+  `scan_token` binding `DELETE` to one specific prior scan (intersected
+  with a fresh re-scan for safety, never trusted alone). (3) disk-space
+  check ignored the incoming file's own size — `500MB free / 200MB reserve`
+  let an `800MB` upload straight through; fixed by weighing
+  `request.content_length` against the reserve. (4) that check ran *after*
+  `request.files` was touched, which already forces Werkzeug to spool the
+  body to disk — moved earlier, and nginx's own full-body buffering (on by
+  default) is now disabled for `/api/assets` specifically
+  (`proxy_request_buffering off`). (5) a failed `db.session.commit()` after
+  `file.save()` left a permanent orphan with no cleanup path — now wrapped
+  in try/except that deletes the file on any failure. 6 new tests (154
+  total). **Still needs the actual hardware acceptance test — not marked
+  verified yet.**
 
 ### Tier 5 — Features, in market-value order
 - #17 rotation/portrait (biggest market unlock)
@@ -276,11 +298,13 @@ Trust before features: the product's problem is reliability, not capability.
 
 ### Hardware verification — outstanding
 Everything through the morning quick-wins batch (#42, #38 item 1, #16),
-#3, #7, and now #23 (backup/restore) is hardware-verified (2026-08-27/28) —
-see the strikethrough notes above and in Tier 5. What's left, both Tier 4:
-- #24 storage hygiene — orphan scan/clean not yet run on a device
-- #11 SD-card wear — nothing to click; verify by absence (SD card should
-  simply wear less over time / `journalctl` volume stays low)
+#3, #7, #23 (backup/restore), and #11 (SD wear) is complete/closed
+(2026-08-27/28) — see the strikethrough notes above and in Tier 5. Only
+Tier 4's #24 remains:
+- #24 storage hygiene — code-audited and hardened in 1.11.2 (grace period,
+  scan-token TOCTOU fix, reserve-aware upload check, nginx request
+  buffering, failed-upload cleanup); orphan scan/clean/hardware acceptance
+  test still needs to actually run on a device before this closes.
 
 ---
 

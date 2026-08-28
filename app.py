@@ -9,7 +9,7 @@ License: MIT - see LICENSE. Third-party components: see THIRD_PARTY_NOTICES.md
 
 # Single source of truth for the version. Templates read it via the
 # app_version context processor; do not hardcode it in the UI.
-__version__ = "1.11.1"
+__version__ = "1.11.2"
 
 import os
 import io
@@ -766,16 +766,34 @@ def api_create_asset():
         return jsonify(asset.to_dict()), 201
 
     # File upload
+    #
+    # This check must run BEFORE anything touches request.files: merely
+    # testing membership below forces Werkzeug to fully parse the multipart
+    # body, which for a large file means it is already spooled to a temp
+    # file on this same filesystem (and, depending on the nginx config,
+    # possibly buffered there a second time by nginx itself) before any
+    # Flask code has a chance to object. Content-Length is a safe upper
+    # bound for the incoming request size — it already includes the
+    # multipart boundaries and other form fields, so it never
+    # underestimates the file itself.
+    free_bytes = shutil.disk_usage(str(UPLOAD_FOLDER)).free
+    content_length = request.content_length
+    if content_length and free_bytes - content_length < MIN_FREE_DISK_BYTES:
+        return jsonify({
+            "error": (
+                f"Not enough disk space to accept this upload "
+                f"({formatted_bytes(free_bytes)} free). Delete some assets first."
+            )
+        }), 507
+
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
     file = request.files["file"]
     if not file.filename or not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type"}), 400
 
-    # Refuse before writing rather than let the disk actually fill (#24) — a
-    # full disk on this device does not just fail the upload, it risks a
-    # corrupted mid-write on the SQLite database sitting on the same
-    # filesystem (see the WAL discussion in #11).
+    # Backstop for when Content-Length was absent, or another upload raced
+    # this one for the same free space between the check above and here.
     free_bytes = shutil.disk_usage(str(UPLOAD_FOLDER)).free
     if free_bytes < MIN_FREE_DISK_BYTES:
         return jsonify({
@@ -790,32 +808,44 @@ def api_create_asset():
     ext = filename.rsplit(".", 1)[1].lower()
     stored_name = f"{asset_id}.{ext}"
     save_path = UPLOAD_FOLDER / stored_name
-    file.save(str(save_path))
-
-    atype = get_asset_type(filename)
-    mimetype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    filesize = save_path.stat().st_size
-    duration = 10
     thumbnail = None
 
-    if atype == "video":
-        duration = get_video_duration(save_path)
-        thumbnail = generate_thumbnail(save_path, asset_id)
-    elif atype == "image":
-        thumbnail = f"/static/uploads/{stored_name}"
-    elif atype == "pdf":
-        duration = 30  # default total duration; player spreads it evenly across pages
-        thumbnail = generate_pdf_thumbnail(save_path, asset_id)
+    # If anything below fails after the file has been written — a locked
+    # database, a full disk on the db write, anything — the file must not
+    # become a permanent orphan with no Asset row to ever reference it.
+    try:
+        file.save(str(save_path))
 
-    name = request.form.get("name", filename)
-    asset = Asset(
-        id=asset_id, name=name, asset_type=atype,
-        uri=f"/static/uploads/{stored_name}",
-        duration=duration, mimetype=mimetype, filesize=filesize,
-        thumbnail=thumbnail, created_by=session["user_id"]
-    )
-    db.session.add(asset)
-    db.session.commit()
+        atype = get_asset_type(filename)
+        mimetype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        filesize = save_path.stat().st_size
+        duration = 10
+
+        if atype == "video":
+            duration = get_video_duration(save_path)
+            thumbnail = generate_thumbnail(save_path, asset_id)
+        elif atype == "image":
+            thumbnail = f"/static/uploads/{stored_name}"
+        elif atype == "pdf":
+            duration = 30  # default total duration; player spreads it evenly across pages
+            thumbnail = generate_pdf_thumbnail(save_path, asset_id)
+
+        name = request.form.get("name", filename)
+        asset = Asset(
+            id=asset_id, name=name, asset_type=atype,
+            uri=f"/static/uploads/{stored_name}",
+            duration=duration, mimetype=mimetype, filesize=filesize,
+            thumbnail=thumbnail, created_by=session["user_id"]
+        )
+        db.session.add(asset)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        save_path.unlink(missing_ok=True)
+        if thumbnail and thumbnail.startswith("/static/uploads/"):
+            (BASE_DIR / thumbnail.lstrip("/")).unlink(missing_ok=True)
+        return jsonify({"error": "Could not save this asset. Please try again."}), 500
+
     return jsonify(asset.to_dict()), 201
 
 
@@ -1401,22 +1431,51 @@ def api_system_timezone_set():
 
 # ── API: Storage hygiene (Admin) ──────────────────────────────────────────────
 
+# A file must be at least this old before it can ever be reported or deleted
+# as an orphan. Without this, a scan racing the (normally brief, but
+# unbounded) window between file.save() finishing and the owning Asset row's
+# db.session.commit() landing could see a real, about-to-be-referenced
+# upload as garbage and delete it out from under the insert that was about
+# to reference it.
+ORPHAN_GRACE_SECONDS = 15 * 60
+
+# How long a scan's candidate list stays valid for a follow-up DELETE (#24).
+# Ties a cleanup to a specific, already-reviewed scan rather than letting
+# DELETE re-scan from scratch — see api_storage_orphans_clean.
+ORPHAN_SCAN_TOKEN_TTL_SECONDS = 5 * 60
+_orphan_scans = {}
+
+
+def _prune_orphan_scans():
+    now = time.time()
+    for token in [t for t, v in _orphan_scans.items() if v["expires"] < now]:
+        _orphan_scans.pop(token, None)
+
+
 def find_orphaned_upload_files():
     """Files under static/uploads/ that no Asset references (#24) — left
     behind by an interrupted upload, a failed delete, or a restored database
     that predates them. Both the asset's own file (uri) and its generated
     thumbnail are treated as referenced, or every video/PDF thumbnail would
-    be flagged as orphaned."""
+    be flagged as orphaned. Anything younger than ORPHAN_GRACE_SECONDS is
+    never reported, regardless of reference status — see the constant."""
     referenced = set()
     for a in Asset.query.all():
         for field in (a.uri, a.thumbnail):
             if field and field.startswith("/static/uploads/"):
                 referenced.add(str((BASE_DIR / field.lstrip("/")).resolve()))
 
+    cutoff = time.time() - ORPHAN_GRACE_SECONDS
     orphans = []
     for f in UPLOAD_FOLDER.rglob("*"):
-        if f.is_file() and str(f.resolve()) not in referenced:
-            orphans.append(f)
+        if not f.is_file() or str(f.resolve()) in referenced:
+            continue
+        try:
+            if f.stat().st_mtime > cutoff:
+                continue  # too new — could be an in-flight upload or restore
+        except OSError:
+            continue
+        orphans.append(f)
     return orphans
 
 
@@ -1424,17 +1483,28 @@ def find_orphaned_upload_files():
 @login_required
 @role_required("admin")
 def api_storage_orphans():
-    """Report only — deletion is a separate, explicit call (#24). A restore
-    in progress, or a request racing an in-flight upload, must never look
-    like garbage to be swept."""
+    """Report only — deletion is a separate, explicit call (#24). Issues a
+    scan_token binding this exact candidate list to whatever DELETE call
+    follows, so cleanup can never silently remove a file this scan never
+    saw (see api_storage_orphans_clean)."""
+    _prune_orphan_scans()
     orphans = find_orphaned_upload_files()
     total = sum(f.stat().st_size for f in orphans)
+    token = secrets.token_urlsafe(16)
+    _orphan_scans[token] = {
+        "paths": [str(f.resolve()) for f in orphans],
+        "expires": time.time() + ORPHAN_SCAN_TOKEN_TTL_SECONDS,
+    }
     return jsonify({
         "count": len(orphans),
         "total_bytes": total,
         # Capped: a very messy install should not return an enormous payload.
+        # The cap is display-only — scan_token still covers every candidate,
+        # not just the first 200, so cleanup never acts on files the count
+        # above didn't already account for.
         "files": [str(f.relative_to(UPLOAD_FOLDER)) for f in orphans[:200]],
         "truncated": len(orphans) > 200,
+        "scan_token": token,
     })
 
 
@@ -1442,10 +1512,31 @@ def api_storage_orphans():
 @login_required
 @role_required("admin")
 def api_storage_orphans_clean():
-    orphans = find_orphaned_upload_files()
+    """Deletes only the intersection of: a specific prior scan's candidate
+    list, a fresh re-scan (still unreferenced, still older than the grace
+    period), and actually inside UPLOAD_FOLDER. This closes the gap where a
+    naive re-scan-on-delete could remove a file the admin never reviewed —
+    created after the GET, or outside what the GET reported (#24)."""
+    _prune_orphan_scans()
+    data = get_json_dict() or {}
+    token = data.get("scan_token") or request.args.get("scan_token")
+    scan = _orphan_scans.pop(token, None) if token else None
+    if not scan:
+        return jsonify({
+            "error": "This list is out of date — run the scan again before cleaning up."
+        }), 400
+
+    live_orphans = {str(f.resolve()) for f in find_orphaned_upload_files()}
+    upload_root = str(UPLOAD_FOLDER.resolve())
+
     freed = 0
     removed = 0
-    for f in orphans:
+    for path_str in scan["paths"]:
+        if path_str not in live_orphans:
+            continue
+        if not path_str.startswith(upload_root + os.sep):
+            continue
+        f = Path(path_str)
         try:
             freed += f.stat().st_size
             f.unlink()

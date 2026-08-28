@@ -512,6 +512,16 @@ def test_timezone_set_rejects_unknown_zone(client):
 
 # ── Storage hygiene ───────────────────────────────────────────────────────────
 
+def _age_file(path, seconds_old):
+    """Backdate a file's mtime so it reads as older than the orphan grace
+    period without actually waiting."""
+    import os as _os
+    import time as _time
+
+    old = _time.time() - seconds_old
+    _os.utime(path, (old, old))
+
+
 def test_storage_orphans_requires_admin(client):
     login(client)
     make_user(client, "ed10", "editor")
@@ -534,6 +544,7 @@ def test_storage_orphans_finds_an_unreferenced_file(client):
     login(client)
     stray = lumina.UPLOAD_FOLDER / "not-in-the-database.jpg"
     stray.write_bytes(b"orphaned")
+    _age_file(stray, lumina.ORPHAN_GRACE_SECONDS + 60)
     try:
         body = client.get("/api/storage/orphans").get_json()
         assert body["count"] == 1
@@ -558,6 +569,7 @@ def test_storage_orphans_does_not_flag_a_referenced_thumbnail(client):
     thumb_dir.mkdir(exist_ok=True)
     thumb_path = thumb_dir / f"{asset_id}.jpg"
     thumb_path.write_bytes(b"thumb")
+    _age_file(thumb_path, lumina.ORPHAN_GRACE_SECONDS + 60)
     try:
         with lumina.app.app_context():
             asset = lumina.db.session.get(lumina.Asset, asset_id)
@@ -576,14 +588,76 @@ def test_storage_orphans_clean_removes_only_orphans(client):
     login(client)
     stray = lumina.UPLOAD_FOLDER / "cleanup-me.jpg"
     stray.write_bytes(b"xx")
+    _age_file(stray, lumina.ORPHAN_GRACE_SECONDS + 60)
     try:
-        res = client.delete("/api/storage/orphans")
+        scan_token = client.get("/api/storage/orphans").get_json()["scan_token"]
+        res = client.delete("/api/storage/orphans", json={"scan_token": scan_token})
         body = res.get_json()
         assert body["removed"] == 1
         assert body["freed_bytes"] == 2
         assert not stray.exists()
     finally:
         stray.unlink(missing_ok=True)
+
+
+def test_storage_orphans_does_not_flag_a_recently_created_file(client):
+    """A file that just landed on disk must never be reported (or deletable)
+    as an orphan - it could be an in-flight upload a fraction of a second
+    away from getting its Asset row (#24's ORPHAN_GRACE_SECONDS)."""
+    import app as lumina
+
+    login(client)
+    fresh = lumina.UPLOAD_FOLDER / "just-written.jpg"
+    fresh.write_bytes(b"brand new")
+    try:
+        body = client.get("/api/storage/orphans").get_json()
+        assert body["count"] == 0
+        assert body["files"] == []
+    finally:
+        fresh.unlink(missing_ok=True)
+
+
+def test_storage_orphans_clean_requires_a_valid_scan_token(client):
+    """DELETE must be bound to a specific prior GET - it must not silently
+    re-scan and act on whatever it finds right now (#24 TOCTOU)."""
+    import app as lumina
+
+    login(client)
+    stray = lumina.UPLOAD_FOLDER / "needs-a-token.jpg"
+    stray.write_bytes(b"xx")
+    _age_file(stray, lumina.ORPHAN_GRACE_SECONDS + 60)
+    try:
+        res = client.delete("/api/storage/orphans")
+        assert res.status_code == 400
+        assert stray.exists()
+
+        res = client.delete("/api/storage/orphans", json={"scan_token": "not-a-real-token"})
+        assert res.status_code == 400
+        assert stray.exists()
+    finally:
+        stray.unlink(missing_ok=True)
+
+
+def test_storage_orphans_clean_ignores_files_created_after_the_scan(client):
+    """A file that appears after the admin's GET must never be swept by the
+    DELETE that follows it, even though a fresh independent scan would find
+    it too (#24 TOCTOU)."""
+    import app as lumina
+
+    login(client)
+    # Scan while uploads is empty - the token covers zero candidates.
+    scan_token = client.get("/api/storage/orphans").get_json()["scan_token"]
+
+    late = lumina.UPLOAD_FOLDER / "arrived-after-the-scan.jpg"
+    late.write_bytes(b"xx")
+    _age_file(late, lumina.ORPHAN_GRACE_SECONDS + 60)
+    try:
+        res = client.delete("/api/storage/orphans", json={"scan_token": scan_token})
+        body = res.get_json()
+        assert body["removed"] == 0
+        assert late.exists()
+    finally:
+        late.unlink(missing_ok=True)
 
 
 def test_upload_is_refused_when_disk_is_nearly_full(client, monkeypatch):
@@ -601,6 +675,82 @@ def test_upload_is_refused_when_disk_is_nearly_full(client, monkeypatch):
     data = {"file": (_io.BytesIO(b"fake image bytes"), "photo.jpg")}
     res = client.post("/api/assets", data=data, content_type="multipart/form-data")
     assert res.status_code == 507
+
+
+def test_upload_is_refused_when_it_would_leave_less_than_the_reserve(client, monkeypatch):
+    """500 MB free, 200 MB reserve, an 800 MB upload must be refused before
+    a single byte is written - not just when the disk is already critically
+    low (#24). The pre-check runs against the declared Content-Length before
+    request.files is ever touched, so a real multi-hundred-MB body isn't
+    needed here - a small body with an overridden Content-Length exercises
+    the same code path."""
+    import io as _io
+    import app as lumina
+    from collections import namedtuple
+
+    Usage = namedtuple("Usage", "total used free")
+    monkeypatch.setattr(
+        lumina.shutil, "disk_usage",
+        lambda path: Usage(1_000_000_000, 500_000_000, 500 * 1024 * 1024)
+    )
+
+    login(client)
+    data = {"file": (_io.BytesIO(b"small body, large declared size"), "video.mp4")}
+    res = client.post(
+        "/api/assets", data=data, content_type="multipart/form-data",
+        # Werkzeug's test client recomputes Content-Length from the actual
+        # body it's given, so environ_overrides is the way to make the
+        # request declare a size larger than what's actually sent - exactly
+        # what the pre-parse check is meant to catch from a real client.
+        environ_overrides={"CONTENT_LENGTH": str(800 * 1024 * 1024)},
+    )
+    assert res.status_code == 507
+
+
+def test_upload_is_accepted_when_it_safely_fits(client, monkeypatch):
+    import io as _io
+    import app as lumina
+    from collections import namedtuple
+
+    Usage = namedtuple("Usage", "total used free")
+    monkeypatch.setattr(
+        lumina.shutil, "disk_usage",
+        lambda path: Usage(1_000_000_000, 100_000_000, 900 * 1024 * 1024)
+    )
+
+    login(client)
+    data = {"file": (_io.BytesIO(b"small file"), "photo.jpg")}
+    res = client.post("/api/assets", data=data, content_type="multipart/form-data")
+    assert res.status_code == 201
+    # Clean up the real file this created - UPLOAD_FOLDER is the project's
+    # actual static/uploads directory and persists across test runs.
+    uri = res.get_json()["uri"]
+    (lumina.BASE_DIR / uri.lstrip("/")).unlink(missing_ok=True)
+
+
+def test_failed_asset_creation_cleans_up_the_saved_file(client, monkeypatch):
+    """If the database write fails after the file is already on disk, the
+    file must not become a permanent orphan with no Asset row to ever
+    reference it (#24). Compares a before/after snapshot rather than
+    asserting the folder is empty - UPLOAD_FOLDER is the real project
+    directory and persists across tests in this suite."""
+    import io as _io
+    import app as lumina
+
+    login(client)
+    before = set(lumina.UPLOAD_FOLDER.glob("*.jpg"))
+
+    def boom():
+        raise lumina.sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(lumina.db.session, "commit", boom)
+
+    data = {"file": (_io.BytesIO(b"fake image bytes"), "photo.jpg")}
+    res = client.post("/api/assets", data=data, content_type="multipart/form-data")
+    assert res.status_code == 500
+
+    after = set(lumina.UPLOAD_FOLDER.glob("*.jpg"))
+    assert after == before
 
 
 # ── Backup and restore ────────────────────────────────────────────────────────

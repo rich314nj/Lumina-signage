@@ -330,6 +330,21 @@ server {
         proxy_buffering off;
     }
 
+    # Asset uploads (#24): by default nginx buffers the ENTIRE request body
+    # to its own disk-backed temp file before forwarding anything upstream —
+    # on a large video that's a full extra copy on this same disk before
+    # Flask's free-space check ever runs. Streaming straight through removes
+    # that copy; Gunicorn/Werkzeug still spool their own, smaller-window copy.
+    location = /api/assets {
+        proxy_pass http://127.0.0.1:${APP_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:${APP_PORT};
         proxy_set_header Host \$host;

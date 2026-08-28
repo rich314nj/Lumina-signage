@@ -1453,15 +1453,19 @@ async function loadHealth() {
   }
 }
 
+let orphanScanToken = null;
+
 async function checkOrphanFiles() {
   const note = document.getElementById('orphanNote');
   note.textContent = 'Checking…';
+  orphanScanToken = null;
   try {
     const body = await api('GET', '/api/storage/orphans');
     if (!body.count) {
       note.textContent = 'No unused files found.';
       return;
     }
+    orphanScanToken = body.scan_token;
     note.innerHTML = `${body.count} unused file${body.count === 1 ? '' : 's'} found (${formatBytes(body.total_bytes)}) — <a href="#" onclick="cleanOrphanFiles();return false;">remove them</a>`;
   } catch (e) {
     note.textContent = e.message;
@@ -1472,9 +1476,17 @@ async function cleanOrphanFiles() {
   if (!confirm('Delete these unused files?\n\nThey are not referenced by any asset, so nothing currently on screen will be affected. This cannot be undone.')) return;
   const note = document.getElementById('orphanNote');
   try {
-    const res = await fetch('/api/storage/orphans', { method: 'DELETE' });
+    // Bound to the scan the admin just reviewed above — if it's gone stale
+    // (a few minutes old, or already used), the server asks for a re-scan
+    // rather than silently sweeping whatever it finds right now.
+    const res = await fetch('/api/storage/orphans', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scan_token: orphanScanToken }),
+    });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'Cleanup failed');
+    orphanScanToken = null;
     note.textContent = `Removed ${body.removed} file${body.removed === 1 ? '' : 's'}, freed ${formatBytes(body.freed_bytes)}.`;
     toast('Unused files removed', 'success');
     loadHealth();
