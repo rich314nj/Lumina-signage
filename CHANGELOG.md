@@ -5,6 +5,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.9.2] — 2026-08-27
+
+### Fixed
+
+- **[Critical] The kiosk ran invisibly behind the console, and "Restart display" could not recover it** (#32) — `lumina-kiosk.service` claimed `/dev/tty1` with `StandardInput=tty-fail`, which does not fail loudly when the console `getty` already owns the terminal; it simply starts anyway without becoming the active virtual terminal. The service reported healthy and `cage` kept running, while the screen showed boot text. **Restart display and Reboot both appeared to hang** because neither addressed the actual contention, and the journal showed no errors at all — the service log looked perfectly normal throughout.
+  - `Conflicts=getty@tty1.service` now makes systemd stop the console getty when the kiosk starts. This is precisely what `systemctl stop getty@tty1` did by hand during diagnosis.
+  - `StandardInput=tty-force` takes the terminal rather than deferring to it.
+  - `StartLimitIntervalSec`/`StartLimitBurst` added so a genuine failure stops cleanly and surfaces in the Health panel instead of retrying forever.
+- **[High] The first-boot user wizard blocked the image indefinitely** — the pi-gen config set `FIRST_USER_NAME`/`FIRST_USER_PASS` but not `DISABLE_FIRST_BOOT_USER_RENAME`, so images shipped with Raspberry Pi OS's user-setup wizard enabled. `userconfig.service` ran on `tty1` and blocked with *no timeout*, waiting for keyboard input a signage device will never receive — a second competitor for the display, and the reason SSH greeted every login with a warning that no valid user had been set up. Now disabled by default, overridable at build time.
+
+---
+
 ## [1.9.1] — 2026-08-27
 
 ### Fixed

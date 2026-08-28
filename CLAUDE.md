@@ -98,6 +98,16 @@ do not try to "fix" it by reintroducing qemu.
   user a Viewer. Worth grepping for on any UI change.
 - **A white kiosk screen means Chromium is not showing our page** — the player
   body is `#000`. White is a browser error/blank page.
+- **A *healthy* kiosk service does not mean a visible kiosk.** `cage` can run
+  happily while the console `getty` owns the active VT, so the screen shows boot
+  text and the journal shows nothing wrong. The unit needs
+  `Conflicts=getty@tty1.service` and `StandardInput=tty-force`; `tty-fail` does
+  not fail loudly, it just loses the display. Diagnose with
+  `systemctl stop getty@tty1 && systemctl restart lumina-kiosk` — if that fixes
+  it, it is VT contention.
+- **pi-gen needs `DISABLE_FIRST_BOOT_USER_RENAME=1`.** Setting `FIRST_USER_NAME`
+  alone is not enough: the first-boot user wizard still ships, and
+  `userconfig.service` blocks on tty1 with no timeout waiting for input.
 - **The Pi cannot scan for WiFi while acting as an access point.** One radio,
   and the driver will not do both. Anything needing a network list while the
   setup hotspot is up must scan and cache beforehand (see #38). A `Scan` that

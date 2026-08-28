@@ -19,6 +19,11 @@ PIGEN_BRANCH="${PIGEN_BRANCH:-bookworm-arm64}"
 DEPLOY_COMPRESSION="${DEPLOY_COMPRESSION:-zip}"
 FIRST_USER_NAME="${FIRST_USER_NAME:-pi}"
 FIRST_USER_PASS="${FIRST_USER_PASS:-lumina}"
+# Without this pi-gen ships the first-boot user wizard, so userconfig.service
+# runs on tty1 and blocks indefinitely ("no limit") waiting for input that a
+# signage device will never receive — competing with the kiosk for the display
+# and leaving SSH warning that no valid user has been set up.
+DISABLE_FIRST_BOOT_USER_RENAME="${DISABLE_FIRST_BOOT_USER_RENAME:-1}"
 ENABLE_SSH="${ENABLE_SSH:-1}"
 TARGET_HOSTNAME="${TARGET_HOSTNAME:-lumina}"
 # Raspberry Pi OS soft-blocks the WiFi radio until a wireless regulatory
@@ -67,6 +72,7 @@ TARGET_HOSTNAME='$TARGET_HOSTNAME'
 ENABLE_SSH=$ENABLE_SSH
 FIRST_USER_NAME='$FIRST_USER_NAME'
 FIRST_USER_PASS='$FIRST_USER_PASS'
+DISABLE_FIRST_BOOT_USER_RENAME=$DISABLE_FIRST_BOOT_USER_RENAME
 WPA_COUNTRY='$WPA_COUNTRY'
 TIMEZONE_DEFAULT='$TIMEZONE_DEFAULT'
 STAGE_LIST="stage0 stage1 stage2 stage-lumina"

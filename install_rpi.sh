@@ -290,8 +290,18 @@ if [[ -n "$KIOSK_USER" ]]; then
     cat > /etc/systemd/system/lumina-kiosk.service <<EOF
 [Unit]
 Description=LuminaShow Kiosk Display
-After=lumina.service nginx.service systemd-user-sessions.service
+After=lumina.service nginx.service systemd-user-sessions.service getty@tty1.service
 Wants=lumina.service
+# The console getty owns /dev/tty1. Without this the kiosk starts and keeps
+# running, but never becomes the active virtual terminal — so the screen shows
+# boot text while the player runs invisibly behind it, and "restart display"
+# cannot recover it. Conflicts= makes systemd stop the getty automatically,
+# which is what "systemctl stop getty@tty1" did by hand.
+Conflicts=getty@tty1.service
+# Stop retrying eventually, so a genuine failure surfaces in the Health panel
+# instead of cycling forever.
+StartLimitIntervalSec=90
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -300,7 +310,9 @@ PAMName=login
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes
-StandardInput=tty-fail
+# tty-force takes the terminal; tty-fail politely declined and left the
+# console in charge of the display.
+StandardInput=tty-force
 StandardOutput=journal
 StandardError=journal
 ExecStart=/usr/bin/cage -- /usr/local/bin/lumina-kiosk
