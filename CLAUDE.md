@@ -121,6 +121,14 @@ Trust before features: the product's problem is reliability, not capability.
 - ~~#27 clicking the drop zone opened the picker but never uploaded~~
 - ~~#31 thumbnails in the Add-from-Library picker~~
 
+### UI polish backlog (small, do opportunistically)
+- **#40 playlist editor is too narrow** — the Add from Library panel is clipped;
+  the modal is 700px but its grid needs ~800px. Note the real lesson: the
+  breakpoint is keyed to the *viewport* while the constraint is the *modal*, so
+  a container query is the correct fix.
+- #39 follow-up — the playlist editor's drag-to-reorder, the asset grid, and the
+  schedule day picker have not been reviewed at phone width.
+
 ### Tier 2 — Make failures survivable ✅ done in 1.9.0
 - ~~#32 reboot / shutdown / restart-display controls~~ — on the System page
 - ~~#10 health reporting + player heartbeat~~
