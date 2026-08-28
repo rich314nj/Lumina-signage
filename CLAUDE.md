@@ -4,7 +4,7 @@ Self-hosted digital signage for Raspberry Pi 4/5. Positioned as a direct
 replacement for Anthias/Screenly OSE, with the differentiator being **setup and
 network management that a non-technical person can do without a keyboard**.
 
-Repo: `rich314nj/Lumina-signage` · Current version: **1.11.0**
+Repo: `rich314nj/Lumina-signage` · Current version: **1.11.1**
 
 ---
 
@@ -118,6 +118,15 @@ do not try to "fix" it by reintroducing qemu.
   and the driver will not do both. Anything needing a network list while the
   setup hotspot is up must scan and cache beforehand (see #38). A `Scan` that
   returns nothing while connected over the hotspot is this, not a bug.
+- **A security change that removes a fixed default must be grepped for every
+  place the old default was *documented*, not just where it was set.** #12
+  replaced the fixed `admin/admin123` password with a random per-device one
+  (`init_db()`, `first_boot_admin_password()`), but `templates/login.html`
+  still hardcoded "Default credentials: admin / admin123" — the exact text
+  that then told a real user to type a password the device would reject.
+  Fixed in 1.11.1: the login page and the player's setup screen both now
+  read `/api/device-info`'s `first_boot_password` field live instead of
+  ever printing a static credential.
 
 ---
 

@@ -479,12 +479,21 @@ async function renderSetupScreen() {
   if (addresses.length) {
     title.textContent = 'Ready for content';
     subtitle.textContent = 'This screen is connected and waiting for a playlist.';
+    // A freshly-installed device has a random per-device admin password
+    // (#12) instead of a fixed default — this setup screen is the only
+    // place that password is ever shown, so it must appear here or the
+    // device is unloggable-into. Cleared automatically after first login.
     const steps =
       step(1, `On any device on the same network, open ` +
               addresses.map(a => `<span class="setup-value">http://${escHtml(a)}</span>`).join(' or ') +
               ' — or scan the code') +
-      step(2, `Sign in and upload images, video, or PDFs under <b>Assets</b>`) +
-      step(3, `Create a playlist, mark it <b>Active</b>, and it starts playing here`);
+      step(2, info.first_boot_password
+              ? `Sign in as <span class="setup-value">admin</span> / <span class="setup-value">${escHtml(info.first_boot_password)}</span> — change your password after signing in`
+              : `Sign in and upload images, video, or PDFs under <b>Assets</b>`) +
+      (info.first_boot_password
+        ? step(3, `Upload images, video, or PDFs under <b>Assets</b>`) +
+          step(4, `Create a playlist, mark it <b>Active</b>, and it starts playing here`)
+        : step(3, `Create a playlist, mark it <b>Active</b>, and it starts playing here`));
     const qr = qrBlock(
       '/api/device-info/qr/address.svg?t=' + Date.now(),
       'Scan to open the admin page on your phone'

@@ -9,7 +9,7 @@ License: MIT - see LICENSE. Third-party components: see THIRD_PARTY_NOTICES.md
 
 # Single source of truth for the version. Templates read it via the
 # app_version context processor; do not hardcode it in the UI.
-__version__ = "1.11.0"
+__version__ = "1.11.1"
 
 import os
 import io

@@ -145,11 +145,9 @@ input::placeholder { color: var(--text3); }
       <button type="submit" class="btn-login" id="loginBtn">Sign In →</button>
     </form>
 
-    <hr class="divider">
-    <div class="default-creds">
-      <p>Default credentials:<br>
-      Username: <strong>admin</strong><br>
-      Password: <strong>admin123</strong></p>
+    <hr class="divider" id="credsDivider" style="display:none">
+    <div class="default-creds" id="credsBox" style="display:none">
+      <p id="credsText"></p>
     </div>
   </div>
 
@@ -170,6 +168,28 @@ function toggleTheme() {
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('lumina-theme', next);
   document.getElementById('loginThemeBtn').textContent = next === 'dark' ? '🌙' : '☀️';
+}
+
+// Show the random first-boot password (#12) if this device has never had a
+// successful login yet. Never hardcode a default here — the old fixed
+// admin/admin123 hint is exactly what caused a fresh device to reject the
+// password a user copied from this page.
+(async function showFirstBootPassword() {
+  try {
+    const info = await (await fetch('/api/device-info')).json();
+    if (info && info.first_boot_password) {
+      document.getElementById('credsText').innerHTML =
+        `First-boot password:<br>Username: <strong>admin</strong><br>Password: <strong>${escHtmlLogin(info.first_boot_password)}</strong>`;
+      document.getElementById('credsDivider').style.display = '';
+      document.getElementById('credsBox').style.display = '';
+    }
+  } catch (e) { /* device-info not reachable — leave the box hidden */ }
+})();
+
+function escHtmlLogin(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 document.getElementById('loginForm').addEventListener('submit', async e => {

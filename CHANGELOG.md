@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.11.1] — 2026-08-28
+
+Bugfix: the #12 hardening (random per-device admin password instead of a
+fixed default) shipped without any way to actually discover that password.
+The login page still hardcoded "Default credentials: admin / admin123",
+and the setup screen never surfaced the random password at all — so a
+freshly-flashed device was unloggable-into from the UI.
+
+- `templates/login.html` no longer shows a hardcoded default. It fetches
+  `/api/device-info` and shows the real first-boot password when one is
+  still active, and shows nothing once it has been consumed.
+- `templates/player.html`'s "Ready for content" setup screen now shows
+  the first-boot admin username/password inline, the same way it already
+  showed the setup-hotspot WiFi password.
+
 ## [1.11.0] — 2026-08-28
 
 Tier 4 of the roadmap in `CLAUDE.md`: hardening. All four issues — #11, #12,
