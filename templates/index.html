@@ -1478,7 +1478,7 @@ async function checkOrphanFiles() {
     list.innerHTML = body.files.map(f => `<li>${esc(f)}</li>`).join('');
     list.style.display = '';
     const batchNote = body.truncated
-      ? ` — showing the oldest ${body.files.length} below; remove this batch, then scan again for the rest`
+      ? ` — showing ${body.files.length} below; remove this batch, then scan again for the rest`
       : '';
     note.innerHTML = `${body.count} unused file${body.count === 1 ? '' : 's'} found (${formatBytes(body.total_bytes)})${batchNote} — <a href="#" onclick="cleanOrphanFiles();return false;">remove ${body.truncated ? 'this batch' : 'them'}</a>`;
   } catch (e) {
