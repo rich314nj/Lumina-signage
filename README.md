@@ -24,6 +24,7 @@
 - [Troubleshooting](#troubleshooting)
 - [Architecture](#architecture)
 - [Changelog](#changelog)
+- [Author](#author)
 - [License](#license)
 
 ---
@@ -603,14 +604,21 @@ Full release history, including every fix with its severity and issue number, is
 Architecture notes, project conventions, and the tiered roadmap are in [`CLAUDE.md`](CLAUDE.md).
 
 
+## Author
+
+LuminaShow is written and maintained by **Richard Rivera**.
+
 ## License
 
-MIT License â€” see `LICENSE` for details.
+MIT License — see [`LICENSE`](LICENSE) for the full text.
+
+LuminaShow depends on a number of open-source projects, several of them
+GNU-licensed (NetworkManager, systemd, FFmpeg) — see
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for full credit and license details.
 
 ---
 
-*LuminaShow is inspired by [Anthias (Screenly)](https://github.com/Screenly/Anthias) â€” an excellent open-source digital signage project.*
-
+*LuminaShow is inspired by [Anthias (Screenly)](https://github.com/Screenly/Anthias) — an excellent open-source digital signage project.*
 
 ## Raspberry Pi 4/5
 

@@ -2,6 +2,9 @@
 """
 LuminaShow - Digital Signage Platform for Raspberry Pi
 Similar to Anthias/Screenly
+
+Author: Richard Rivera
+License: MIT - see LICENSE. Third-party components: see THIRD_PARTY_NOTICES.md
 """
 
 # Single source of truth for the version. Templates read it via the
