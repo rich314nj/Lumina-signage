@@ -185,6 +185,16 @@ if [[ -z "$SECRET_KEY" ]]; then
   SECRET_KEY="$(openssl rand -hex 32)"
 fi
 
+# A random per-device admin password instead of the same admin/admin123 on
+# every install (#12). Only generated for a genuinely fresh database — a
+# reprovision or reinstall must never reset a password someone already
+# changed. Not persisted anywhere by this script; init_db() below both sets
+# it and writes the one-time setup-screen marker.
+ADMIN_PASSWORD=""
+if [[ "$REPROVISION" != true ]] && [[ ! -f "$INSTALL_DIR/lumina.db" ]]; then
+  ADMIN_PASSWORD="${LUMINA_ADMIN_PASSWORD:-$(openssl rand -hex 6)}"
+fi
+
 cat > "$INSTALL_DIR/.env" <<EOF
 SECRET_KEY=$SECRET_KEY
 PORT=$APP_PORT
@@ -203,7 +213,7 @@ User=$APP_USER
 WorkingDirectory=$INSTALL_DIR
 Environment=PORT=$APP_PORT
 Environment=SECRET_KEY=$SECRET_KEY
-ExecStart=$INSTALL_DIR/venv/bin/gunicorn --bind 0.0.0.0:$APP_PORT --workers 2 --timeout 120 --access-logfile /var/log/lumina/access.log --error-logfile /var/log/lumina/error.log app:app
+ExecStart=$INSTALL_DIR/venv/bin/gunicorn --bind 127.0.0.1:$APP_PORT --workers 2 --timeout 120 --error-logfile /var/log/lumina/error.log app:app
 Restart=always
 RestartSec=5
 
@@ -227,6 +237,20 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
+    # The kiosk player polls these every few seconds around the clock, and
+    # the setup screen's QR codes are re-fetched on every poll too — logging
+    # each hit writes tens of thousands of lines a day for no benefit and
+    # wears the SD card for nothing (#11).
+    location ~ ^/api/(current-playlist|device-info|player/heartbeat) {
+        access_log off;
+        proxy_pass http://127.0.0.1:$APP_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_buffering off;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:$APP_PORT;
         proxy_set_header Host \$host;
@@ -240,6 +264,19 @@ EOF
 
 ln -sf /etc/nginx/sites-available/lumina /etc/nginx/sites-enabled/lumina
 rm -f /etc/nginx/sites-enabled/default
+
+# Cap the journal rather than leaving it unbounded (#11). Kept persistent —
+# not Storage=volatile — because journalctl on a past boot is the standard
+# way this project has diagnosed field issues (see CLAUDE.md); an unbounded
+# journal just grows forever on a card with no attention, this bounds it
+# without losing the ability to look back after a reboot.
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/lumina.conf <<'EOF'
+[Journal]
+SystemMaxUse=50M
+RuntimeMaxUse=16M
+EOF
+systemctl restart systemd-journald 2>/dev/null || true
 
 chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
 chown -R "$APP_USER:$APP_USER" /var/log/lumina
@@ -263,6 +300,18 @@ if [[ -f "$INSTALL_DIR/scripts/lumina-power" ]]; then
 $APP_USER ALL=(root) NOPASSWD: /usr/local/sbin/lumina-power
 EOF
   chmod 0440 /etc/sudoers.d/lumina-power
+fi
+
+# Backup/restore helper, invoked from the admin UI through its own scoped grant.
+if [[ -f "$INSTALL_DIR/scripts/lumina-backup" ]]; then
+  install -m 0755 "$INSTALL_DIR/scripts/lumina-backup" /usr/local/sbin/lumina-backup
+  sed -i 's/\r$//' /usr/local/sbin/lumina-backup
+  cat > /etc/sudoers.d/lumina-backup <<EOF
+$APP_USER ALL=(root) NOPASSWD: /usr/local/sbin/lumina-backup
+EOF
+  chmod 0440 /etc/sudoers.d/lumina-backup
+  mkdir -p /var/lib/lumina/restore-uploads
+  chown "$APP_USER:$APP_USER" /var/lib/lumina/restore-uploads
 fi
 
 # Vendor PDF.js so PDF assets render with no internet at playback time.
@@ -299,7 +348,16 @@ done
 
 # Initialize DB only if missing.
 if [[ "$REPROVISION" != true ]] && [[ ! -f "$INSTALL_DIR/lumina.db" ]]; then
-  sudo -u "$APP_USER" "$INSTALL_DIR/venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app import init_db; init_db()"
+  sudo -u "$APP_USER" LUMINA_ADMIN_PASSWORD="$ADMIN_PASSWORD" \
+    "$INSTALL_DIR/venv/bin/python" -c "import sys; sys.path.insert(0, '$INSTALL_DIR'); from app import init_db; init_db()"
+
+  # Marker the setup screen reads (unauthenticated GET /api/device-info) so
+  # the random password is visible exactly once, on the device it belongs
+  # to. app.py deletes this the moment anyone logs in successfully.
+  mkdir -p /etc/lumina
+  printf '%s\n' "$ADMIN_PASSWORD" > /etc/lumina/first-boot-password
+  chmod 0600 /etc/lumina/first-boot-password
+  chown "$APP_USER:$APP_USER" /etc/lumina/first-boot-password
 fi
 
 if [[ -n "$KIOSK_USER" ]]; then

@@ -1,0 +1,85 @@
+#!/bin/bash
+set -euo pipefail
+
+# Backup/restore helper for LuminaShow (#23).
+#
+# Installed to /usr/local/sbin/lumina-backup and invoked through its own
+# scoped sudoers grant, like scripts/lumina-update. Export needs no
+# privilege (Flask reads lumina.db and static/uploads directly) — only
+# restore, which replaces the live database, goes through here.
+
+INSTALL_DIR="${LUMINA_INSTALL_DIR:-/opt/lumina-signage}"
+APP_USER="${LUMINA_APP_USER:-lumina}"
+BACKUP_DIR="/var/backups/lumina"
+STAGING_DIR="/var/lib/lumina/restore-uploads"
+
+die() { echo "$1" >&2; exit 1; }
+
+cmd_restore() {
+  local archive="$1" stamp backup workdir
+  [[ -n "$archive" && -f "$archive" ]] || die "archive not found: $archive"
+  # Never an arbitrary path the caller supplies — only a file Flask itself
+  # staged, since this runs as root.
+  case "$archive" in
+    "$STAGING_DIR"/*) ;;
+    *) die "archive must be in the restore staging directory" ;;
+  esac
+
+  stamp="$(date -u +%Y%m%d-%H%M%S)"
+  backup="$BACKUP_DIR/pre-restore-$stamp"
+  mkdir -p "$backup"
+
+  systemctl stop lumina.service 2>/dev/null || true
+
+  # Back up what's about to be replaced before touching anything, so a bad
+  # restore (or a mistaken one) is itself recoverable.
+  [[ -f "$INSTALL_DIR/lumina.db" ]] && cp -a "$INSTALL_DIR/lumina.db" "$backup/" || true
+  [[ -d "$INSTALL_DIR/static/uploads" ]] && cp -a "$INSTALL_DIR/static/uploads" "$backup/uploads" || true
+
+  workdir="$(mktemp -d)"
+  # shellcheck disable=SC2064  # expand workdir now, not at trap time
+  trap "rm -rf '$workdir'" EXIT
+  unzip -q "$archive" -d "$workdir" || die "archive is not a valid zip"
+  [[ -f "$workdir/lumina.db" ]] || die "archive does not contain lumina.db — not a LuminaShow backup"
+
+  rm -f "$INSTALL_DIR/lumina.db" "$INSTALL_DIR/lumina.db-wal" "$INSTALL_DIR/lumina.db-shm"
+  cp "$workdir/lumina.db" "$INSTALL_DIR/lumina.db"
+
+  if [[ -d "$workdir/uploads" ]]; then
+    rm -rf "$INSTALL_DIR/static/uploads"
+    mkdir -p "$INSTALL_DIR/static"
+    cp -a "$workdir/uploads" "$INSTALL_DIR/static/uploads"
+  else
+    mkdir -p "$INSTALL_DIR/static/uploads"
+  fi
+
+  chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR/lumina.db" "$INSTALL_DIR/static/uploads"
+  rm -f "$archive"
+
+  if systemctl start lumina.service; then
+    echo "restored from $archive (previous state backed up at $backup)"
+  else
+    die "restore applied, but the service failed to start — previous state is at $backup"
+  fi
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  restore)
+    # Restarting lumina.service would kill the request that asked for this,
+    # so detach into a transient unit first — same pattern as lumina-update.
+    if command -v systemd-run >/dev/null 2>&1; then
+      exec systemd-run --quiet --unit=lumina-restore --collect \
+        --description="LuminaShow restore" "$0" _restore "${1:-}"
+    fi
+    cmd_restore "${1:-}"
+    ;;
+  _restore)
+    cmd_restore "${1:-}"
+    ;;
+  *)
+    die "usage: lumina-backup {restore} <archive>"
+    ;;
+esac

@@ -39,10 +39,14 @@ fi
 
 rm -f /usr/local/sbin/lumina-net /usr/local/sbin/lumina-update
 rm -f /usr/local/sbin/lumina-power /usr/local/sbin/lumina-netwatch
+rm -f /usr/local/sbin/lumina-backup
 rm -f /usr/local/bin/lumina-kiosk
 rm -f /etc/sudoers.d/lumina-net /etc/sudoers.d/lumina-update
-rm -f /etc/sudoers.d/lumina-power
+rm -f /etc/sudoers.d/lumina-power /etc/sudoers.d/lumina-backup
 rm -rf /var/lib/lumina
+rm -rf /etc/lumina
+rm -f /etc/systemd/journald.conf.d/lumina.conf
+systemctl restart systemd-journald 2>/dev/null || true
 echo -e "${GREEN}✓${RESET} Helper scripts removed"
 
 userdel lumina 2>/dev/null || true

@@ -177,15 +177,17 @@ After installation, open your browser and navigate to:
 http://<your-server-ip>
 ```
 
-**Default credentials:**
+**Credentials:**
 
 | Field | Value |
 |-------|-------|
 | Username | `admin` |
-| Password | `admin123` |
+| Password | A random password generated for this device during install |
 
-> âš ï¸ **Change the default password immediately** after your first login.
-> Go to **Users** â†’ click the edit icon next to admin â†’ set a new password.
+The password is shown once, unauthenticated, on the setup screen (`/player`) and printed at the end of the installer — it stops being shown anywhere the moment you first log in. If you missed it: `sudo cat /etc/lumina/first-boot-password` (only present until first login). Manual local development (`python app.py` without the installer) falls back to `admin123`.
+
+> ⚠️ **Change the password to something memorable** after your first login if you'd like.
+> Go to **Users** → click the edit icon next to admin → set a new password.
 
 ---
 
@@ -457,6 +459,10 @@ curl -b cookies.txt -X PUT http://localhost/api/playlists/<id> \
 | POST | `/api/player/heartbeat` | Reported by the player; unauthenticated like `/api/current-playlist` |
 | GET | `/api/device-info/qr/wifi.svg` | QR code for the setup hotspot; unauthenticated, `404` when no hotspot is active |
 | GET | `/api/device-info/qr/address.svg` | QR code for the device's admin address; unauthenticated |
+| GET | `/api/backup/export` | Downloads a zip: database snapshot + all uploaded assets |
+| POST | `/api/backup/import` | Restore from a backup zip (multipart `file`) — replaces current content |
+| GET | `/api/storage/orphans` | Lists uploaded files no asset references |
+| DELETE | `/api/storage/orphans` | Deletes the files `GET` reported |
 
 ### Network (Admin only, requires NetworkManager)
 

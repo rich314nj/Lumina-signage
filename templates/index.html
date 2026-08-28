@@ -454,6 +454,10 @@ select option { background: var(--surface2); }
         <div class="card" style="max-width:640px;margin-top:20px">
           <div class="card-header"><span class="card-title">Health</span></div>
           <div id="healthBody" style="padding:16px 20px;font-size:13px;color:var(--text3)">Loading…</div>
+          <div style="padding:0 20px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-top:1px solid var(--border);margin-top:4px;padding-top:14px">
+            <button class="btn btn-secondary btn-sm" onclick="checkOrphanFiles()">Check for unused files</button>
+            <span id="orphanNote" style="font-size:12px;color:var(--text3)"></span>
+          </div>
         </div>
 
         <div class="card" style="max-width:640px;margin-top:20px">
@@ -466,6 +470,30 @@ select option { background: var(--surface2); }
             </div>
             <div style="font-size:12px;color:var(--text3)">
               Restarting the display fixes most screen problems without interrupting anything else. Shutting down requires someone to power the device back on by hand.
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="max-width:640px;margin-top:20px">
+          <div class="card-header"><span class="card-title">Backup &amp; Restore</span></div>
+          <div style="padding:16px 20px;display:flex;flex-direction:column;gap:16px">
+            <div>
+              <div style="font-size:13px;font-weight:600;margin-bottom:6px">Download a backup</div>
+              <div style="font-size:12px;color:var(--text3);margin-bottom:10px">
+                Saves every asset, playlist, schedule, and user account to a single file. Does not include network settings or the session key, so it can be restored onto a different device safely.
+              </div>
+              <button class="btn btn-secondary" onclick="downloadBackup()">↓ Download backup</button>
+            </div>
+            <div style="border-top:1px solid var(--border)"></div>
+            <div>
+              <div style="font-size:13px;font-weight:600;margin-bottom:6px">Restore from a backup</div>
+              <div style="font-size:12px;color:var(--text3);margin-bottom:10px">
+                Replaces everything currently on this device. The device restarts its services during restore and is briefly unreachable; if anything goes wrong, the previous state is kept and restored automatically.
+              </div>
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+                <input type="file" id="restoreFile" accept=".zip" style="max-width:260px">
+                <button class="btn btn-danger" onclick="uploadRestore()">↑ Restore</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1425,6 +1453,34 @@ async function loadHealth() {
   }
 }
 
+async function checkOrphanFiles() {
+  const note = document.getElementById('orphanNote');
+  note.textContent = 'Checking…';
+  try {
+    const body = await api('GET', '/api/storage/orphans');
+    if (!body.count) {
+      note.textContent = 'No unused files found.';
+      return;
+    }
+    note.innerHTML = `${body.count} unused file${body.count === 1 ? '' : 's'} found (${formatBytes(body.total_bytes)}) — <a href="#" onclick="cleanOrphanFiles();return false;">remove them</a>`;
+  } catch (e) {
+    note.textContent = e.message;
+  }
+}
+
+async function cleanOrphanFiles() {
+  if (!confirm('Delete these unused files?\n\nThey are not referenced by any asset, so nothing currently on screen will be affected. This cannot be undone.')) return;
+  const note = document.getElementById('orphanNote');
+  try {
+    const res = await fetch('/api/storage/orphans', { method: 'DELETE' });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Cleanup failed');
+    note.textContent = `Removed ${body.removed} file${body.removed === 1 ? '' : 's'}, freed ${formatBytes(body.freed_bytes)}.`;
+    toast('Unused files removed', 'success');
+    loadHealth();
+  } catch (e) { note.textContent = e.message; toast(e.message, 'error'); }
+}
+
 async function devicePower(action) {
   const prompts = {
     'restart-display': 'Restart the display?\n\nThe screen goes blank for a few seconds, then resumes playing.',
@@ -1435,6 +1491,32 @@ async function devicePower(action) {
   try {
     const res = await api('POST', '/api/system/power', { action });
     toast(res.message || 'Done', 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ── Backup and restore ───────────────────────────────────────────────────────
+function downloadBackup() {
+  // A plain navigation, not fetch: the browser's own download handling
+  // (save dialog, progress) is exactly what's wanted for a file that can be
+  // gigabytes, and the session cookie rides along automatically since it's
+  // same-origin.
+  window.location.href = '/api/backup/export';
+}
+
+async function uploadRestore() {
+  const input = document.getElementById('restoreFile');
+  const file = input.files[0];
+  if (!file) { toast('Choose a backup file first', 'error'); return; }
+  if (!confirm(`Restore from "${file.name}"?\n\nThis REPLACES all current assets, playlists, schedules, and users on this device. This cannot be undone from here — the device restarts its services and is briefly unreachable.`)) return;
+
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/api/backup/import', { method: 'POST', body: fd });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Restore failed');
+    toast(body.message || 'Restore started', 'success');
+    input.value = '';
   } catch (e) { toast(e.message, 'error'); }
 }
 

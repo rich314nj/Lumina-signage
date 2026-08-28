@@ -6,16 +6,20 @@ Similar to Anthias/Screenly
 
 # Single source of truth for the version. Templates read it via the
 # app_version context processor; do not hardcode it in the UI.
-__version__ = "1.10.1"
+__version__ = "1.11.0"
 
 import os
 import io
 import re
+import time
 import json
 import uuid
 import shutil
 import socket
 import secrets
+import sqlite3
+import zipfile
+import tempfile
 import ipaddress
 import subprocess
 import mimetypes
@@ -29,8 +33,11 @@ from flask import (
     url_for, session, Response
 )
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 try:
     import qrcode
@@ -54,6 +61,15 @@ ALLOWED_DOC_EXT   = {"pdf"}
 ALLOWED_EXTENSIONS = ALLOWED_IMAGE_EXT | ALLOWED_VIDEO_EXT | ALLOWED_DOC_EXT
 
 MAX_CONTENT_LENGTH = 2 * 1024 * 1024 * 1024  # 2 GB
+MIN_FREE_DISK_BYTES = 200 * 1024 * 1024  # 200 MB — refuse uploads below this (#24)
+
+
+def formatted_bytes(n):
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}" if unit != "B" else f"{n} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
@@ -63,10 +79,56 @@ app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get(
     "DATABASE_URL", f"sqlite:///{BASE_DIR / 'lumina.db'}"
 )
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+
+def database_file_path():
+    """The sqlite file path, honoring DATABASE_URL if it was overridden.
+
+    Two call sites (health's disk report, backup export) previously
+    hardcoded BASE_DIR / "lumina.db" directly instead of reading this back
+    from config — harmless while DATABASE_URL was unused, but both would
+    have silently reported on / backed up an empty, freshly-created file at
+    the wrong path the moment anyone actually moved the database via
+    DATABASE_URL, which is the exact scenario #11 introduced this env var
+    to support.
+    """
+    uri = app.config["SQLALCHEMY_DATABASE_URI"]
+    prefix = "sqlite:///"
+    if uri.startswith(prefix):
+        return Path(uri[len(prefix):])
+    return BASE_DIR / "lumina.db"
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
+# HttpOnly blocks JS from reading the session cookie (XSS mitigation);
+# SameSite=Lax blocks it being sent on cross-site requests. Not Secure: the
+# device is plain HTTP by design (#12 explicitly scopes out building a TLS
+# stack for a LAN appliance) — Secure would make the browser withhold the
+# cookie entirely and silently break every login.
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+# nginx sits in front of every real deployment and sets X-Forwarded-For, but
+# Flask does not trust it by default — without this, request.remote_addr is
+# always 127.0.0.1 for every visitor, which would make the login rate
+# limiter below throttle all users as a single shared bucket.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 db = SQLAlchemy(app)
+
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, connection_record):
+    """WAL mode avoids rewriting the whole database file on every commit —
+    each write only appends to a separate log — and NORMAL synchronous mode
+    skips an fsync per transaction. Both cut disk writes materially on a
+    device that is fine losing the last few seconds of an in-flight
+    transaction to a power loss in exchange (this is signage config, not
+    financial data), which is the appropriate trade-off here (#11)."""
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 
 
 @app.context_processor
@@ -204,6 +266,30 @@ class Schedule(db.Model):
 
 
 # ── Auth Helpers ───────────────────────────────────────────────────────────────
+
+# In-memory login throttle (#12) — there was previously no limit on login
+# attempts at all. A dict is fine here: it resets on a service restart, which
+# is an acceptable trade-off for a LAN appliance and avoids adding a
+# dependency (Redis, a DB table) just to rate-limit a login form.
+_login_failures = {}
+LOGIN_MAX_ATTEMPTS = 10
+LOGIN_WINDOW_SECONDS = 300
+
+
+def login_rate_limited(key):
+    now = time.time()
+    attempts = [t for t in _login_failures.get(key, []) if now - t < LOGIN_WINDOW_SECONDS]
+    _login_failures[key] = attempts
+    return len(attempts) >= LOGIN_MAX_ATTEMPTS
+
+
+def record_login_failure(key):
+    _login_failures.setdefault(key, []).append(time.time())
+
+
+def clear_login_failures(key):
+    _login_failures.pop(key, None)
+
 
 def login_required(f):
     @wraps(f)
@@ -488,19 +574,35 @@ def index():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        # Keyed by IP (via ProxyFix, above) rather than username, so this
+        # can't be used to lock a real admin out by deliberately failing
+        # their username from elsewhere — #12, previously unthrottled.
+        limit_key = request.remote_addr or "unknown"
+        if login_rate_limited(limit_key):
+            msg = "Too many failed login attempts. Try again in a few minutes."
+            if request.is_json:
+                return jsonify({"error": msg}), 429
+            return render_template("login.html", error=msg), 429
+
         data = request.get_json() or request.form
         username = data.get("username", "").strip()
         password = data.get("password", "")
         user = User.query.filter_by(username=username, is_active=True).first()
         if user and user.check_password(password):
+            clear_login_failures(limit_key)
             session["user_id"] = user.id
             session["username"] = user.username
             session["role"] = user.role
             user.last_login = datetime.utcnow()
             db.session.commit()
+            # Any successful login means the random first-boot password (#12)
+            # has done its job — stop exposing it unauthenticated from here on,
+            # regardless of whether this login even used it.
+            clear_first_boot_password_marker()
             if request.is_json:
                 return jsonify({"success": True, "role": user.role})
             return redirect(url_for("index"))
+        record_login_failure(limit_key)
         if request.is_json:
             return jsonify({"error": "Invalid credentials"}), 401
         return render_template("login.html", error="Invalid credentials")
@@ -666,6 +768,19 @@ def api_create_asset():
     file = request.files["file"]
     if not file.filename or not allowed_file(file.filename):
         return jsonify({"error": "Invalid file type"}), 400
+
+    # Refuse before writing rather than let the disk actually fill (#24) — a
+    # full disk on this device does not just fail the upload, it risks a
+    # corrupted mid-write on the SQLite database sitting on the same
+    # filesystem (see the WAL discussion in #11).
+    free_bytes = shutil.disk_usage(str(UPLOAD_FOLDER)).free
+    if free_bytes < MIN_FREE_DISK_BYTES:
+        return jsonify({
+            "error": (
+                f"Not enough disk space to accept this upload "
+                f"({formatted_bytes(free_bytes)} free). Delete some assets first."
+            )
+        }), 507
 
     filename = secure_filename(file.filename)
     asset_id = str(uuid.uuid4())
@@ -1110,7 +1225,7 @@ def power_warnings():
 @role_required("admin")
 def api_health():
     uploads_usage = shutil.disk_usage(str(UPLOAD_FOLDER))
-    db_path = BASE_DIR / "lumina.db"
+    db_path = database_file_path()
 
     heartbeat = None
     if _player_heartbeat.get("at"):
@@ -1281,6 +1396,159 @@ def api_system_timezone_set():
     return jsonify({"success": True, "timezone": tz})
 
 
+# ── API: Storage hygiene (Admin) ──────────────────────────────────────────────
+
+def find_orphaned_upload_files():
+    """Files under static/uploads/ that no Asset references (#24) — left
+    behind by an interrupted upload, a failed delete, or a restored database
+    that predates them. Both the asset's own file (uri) and its generated
+    thumbnail are treated as referenced, or every video/PDF thumbnail would
+    be flagged as orphaned."""
+    referenced = set()
+    for a in Asset.query.all():
+        for field in (a.uri, a.thumbnail):
+            if field and field.startswith("/static/uploads/"):
+                referenced.add(str((BASE_DIR / field.lstrip("/")).resolve()))
+
+    orphans = []
+    for f in UPLOAD_FOLDER.rglob("*"):
+        if f.is_file() and str(f.resolve()) not in referenced:
+            orphans.append(f)
+    return orphans
+
+
+@app.route("/api/storage/orphans")
+@login_required
+@role_required("admin")
+def api_storage_orphans():
+    """Report only — deletion is a separate, explicit call (#24). A restore
+    in progress, or a request racing an in-flight upload, must never look
+    like garbage to be swept."""
+    orphans = find_orphaned_upload_files()
+    total = sum(f.stat().st_size for f in orphans)
+    return jsonify({
+        "count": len(orphans),
+        "total_bytes": total,
+        # Capped: a very messy install should not return an enormous payload.
+        "files": [str(f.relative_to(UPLOAD_FOLDER)) for f in orphans[:200]],
+        "truncated": len(orphans) > 200,
+    })
+
+
+@app.route("/api/storage/orphans", methods=["DELETE"])
+@login_required
+@role_required("admin")
+def api_storage_orphans_clean():
+    orphans = find_orphaned_upload_files()
+    freed = 0
+    removed = 0
+    for f in orphans:
+        try:
+            freed += f.stat().st_size
+            f.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return jsonify({"success": True, "removed": removed, "freed_bytes": freed})
+
+
+# ── API: Backup and restore (Admin) ───────────────────────────────────────────
+
+BACKUP_HELPER = "/usr/local/sbin/lumina-backup"
+RESTORE_STAGING_DIR = "/var/lib/lumina/restore-uploads"
+
+
+def build_backup_archive():
+    """A zip of a WAL-consistent database snapshot plus every uploaded asset.
+
+    Deliberately excludes .env / SECRET_KEY (#23) — restoring this archive
+    onto a different device must not clone its session-signing key.
+    """
+    fd, tmp_db_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    try:
+        # sqlite3's own backup API takes a consistent snapshot regardless of
+        # concurrent writers; a plain file copy under WAL could grab a torn
+        # read mid-checkpoint.
+        src = sqlite3.connect(str(database_file_path()))
+        dst = sqlite3.connect(tmp_db_path)
+        with dst:
+            src.backup(dst)
+        src.close()
+        dst.close()
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(tmp_db_path, "lumina.db")
+            for f in UPLOAD_FOLDER.rglob("*"):
+                if f.is_file():
+                    zf.write(f, f"uploads/{f.relative_to(UPLOAD_FOLDER)}")
+        buf.seek(0)
+        return buf
+    finally:
+        os.remove(tmp_db_path)
+
+
+@app.route("/api/backup/export")
+@login_required
+@role_required("admin")
+def api_backup_export():
+    buf = build_backup_archive()
+    filename = f"lumina-backup-{socket.gethostname()}-{datetime.utcnow():%Y%m%d-%H%M%S}.zip"
+    return Response(
+        buf.getvalue(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.route("/api/backup/import", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_backup_import():
+    if not os.path.exists(BACKUP_HELPER):
+        return jsonify({"error": "Restore is not available on this system"}), 503
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    file = request.files["file"]
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        return jsonify({"error": "Backup file must be a .zip archive"}), 400
+
+    os.makedirs(RESTORE_STAGING_DIR, exist_ok=True)
+    staged_path = os.path.join(RESTORE_STAGING_DIR, f"restore-{uuid.uuid4().hex}.zip")
+    file.save(staged_path)
+
+    # Sanity-check before handing off to the privileged helper — fail fast
+    # with a clear message rather than have the helper discover this after
+    # it has already stopped the service. The zip handle must be closed
+    # (the `with` block exited) before we try to remove the file underneath
+    # it — deleting a file while still holding it open is unsafe generally,
+    # and outright fails on some platforms.
+    try:
+        with zipfile.ZipFile(staged_path) as zf:
+            has_database = "lumina.db" in zf.namelist()
+    except zipfile.BadZipFile:
+        os.remove(staged_path)
+        return jsonify({"error": "Uploaded file is not a valid zip archive"}), 400
+
+    if not has_database:
+        os.remove(staged_path)
+        return jsonify({
+            "error": "This does not look like a LuminaShow backup (no lumina.db found)"
+        }), 400
+
+    if os.geteuid() == 0:
+        rc, out, err = run_cmd([BACKUP_HELPER, "restore", staged_path], timeout=30)
+    else:
+        rc, out, err = run_cmd(["sudo", "-n", BACKUP_HELPER, "restore", staged_path], timeout=30)
+    if rc != 0:
+        return jsonify({"error": err or out or "Could not start the restore"}), 502
+    return jsonify({
+        "success": True,
+        "message": "Restore started. The device will restart its services and may be briefly unreachable.",
+    })
+
+
 # ── API: Updates (Admin) ──────────────────────────────────────────────────────
 
 UPDATE_HELPER = "/usr/local/sbin/lumina-update"
@@ -1357,6 +1625,28 @@ def api_update_apply():
 
 SETUP_AP_CON = "lumina-setup-ap"
 SETUP_AP_CONF = "/etc/lumina/setup-ap.env"
+FIRST_BOOT_PASSWORD_FILE = "/etc/lumina/first-boot-password"
+
+
+def first_boot_admin_password():
+    """The random per-device admin password the installer generated (#12),
+    while it is still the live one. Deliberately time-limited: the marker
+    file is deleted the moment anyone logs in successfully (see /login), so
+    this stops being exposed once it has done its job — not left as a
+    standing way to fetch the admin password from an unauthenticated
+    endpoint forever."""
+    try:
+        with open(FIRST_BOOT_PASSWORD_FILE, encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def clear_first_boot_password_marker():
+    try:
+        os.remove(FIRST_BOOT_PASSWORD_FILE)
+    except OSError:
+        pass
 
 
 def local_ipv4_addresses():
@@ -1443,6 +1733,7 @@ def api_device_info():
         "addresses": local_ipv4_addresses(),
         "wired_link": wired_link_present(),
         "setup_ap": setup_ap_status(),
+        "first_boot_password": first_boot_admin_password(),
     })
 
 
@@ -1762,11 +2053,16 @@ def init_db():
     with app.app_context():
         db.create_all()
         if not User.query.filter_by(username="admin").first():
+            # A random per-device password (set by the installer via this env
+            # var) closes the "every device ships with the same well-known
+            # admin/admin123" hole (#12). Falls back to the old default for a
+            # manual `python app.py` run in local development.
+            password = os.environ.get("LUMINA_ADMIN_PASSWORD", "admin123")
             admin = User(username="admin", email="admin@lumina.local", role="admin")
-            admin.set_password("admin123")
+            admin.set_password(password)
             db.session.add(admin)
             db.session.commit()
-            print("✓ Created default admin user: admin / admin123")
+            print(f"✓ Created default admin user: admin / {password}")
 
 
 if __name__ == "__main__":

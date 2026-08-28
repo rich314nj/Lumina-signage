@@ -5,6 +5,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.11.0] — 2026-08-28
+
+Tier 4 of the roadmap in `CLAUDE.md`: hardening. All four issues — #11, #12,
+#23, #24.
+
+### Added
+
+- **Per-device admin password** (#12) — every install previously shared the same `admin` / `admin123`. A fresh install (not a reprovision or reinstall — an existing password is never touched) now generates a random one and shows it exactly once, unauthenticated, on the setup screen (`GET /api/device-info`) — the same place the WiFi hotspot credentials already appear. The exposure window is deliberately short: the marker file is deleted the moment *any* login succeeds, so it can't be fetched from the LAN indefinitely.
+- **Login throttling** (#12) — `/login` previously had no rate limit at all. Ten failed attempts per five minutes per client IP, then a `429` until the window clears; a successful login resets the counter. Correctly attributes attempts to the real client (`ProxyFix`), not `127.0.0.1` for everyone — nginx sits in front of every real deployment.
+- **Session cookie hardening** (#12) — `HttpOnly` and `SameSite=Lax` set explicitly. Not `Secure`: the device is plain HTTP by design (building a TLS stack for a LAN appliance is explicitly out of scope for this issue), and `Secure` on an HTTP-only cookie would make the browser silently withhold it, breaking every login.
+- **Gunicorn now binds to `127.0.0.1`, not `0.0.0.0`** (#12) — the app port was directly reachable on the LAN in addition to going through nginx's reverse proxy. nginx already proxies to `127.0.0.1`, so nothing else changes.
+- **Backup and restore** (#23) — a **Backup & Restore** card on the System page. Export downloads a single zip with a WAL-consistent database snapshot plus every uploaded asset, deliberately excluding `.env`/`SECRET_KEY` so restoring onto a different device doesn't clone its session-signing key. Restore validates the archive (must contain `lumina.db`) before doing anything, then hands off to a new `scripts/lumina-backup` helper that backs up the current state first, swaps in the new one, and restarts the service — following the same "detach into a transient systemd unit" pattern as the updater, since restarting `lumina.service` would otherwise kill the request that asked for it.
+- **Storage hygiene** (#24) — a **Check for unused files** control on the System page finds files under `static/uploads/` that no asset references (an interrupted upload, a failed delete, a restored database from before they existed) and reports them before offering to remove them; correctly treats both an asset's file *and* its generated thumbnail as "referenced," so video/PDF thumbnails are never flagged. Uploads are now refused with a clear `507` when free disk space is critically low, rather than letting a write fail partway through on the same filesystem the database lives on.
+
+### Fixed
+
+- **[High] Continuous SD card writes from polling — the classic Pi signage failure at 12–24 months** (#11) — the kiosk polls `/api/current-playlist` and `/api/device-info` every 15 seconds and posts a heartbeat on every item change, and both nginx and gunicorn logged every one of those requests. On a real device that's roughly 29,000 log lines a day, around the clock, whether or not anything changed. As diagnosed on the issue, responsiveness and card life were never actually in tension — the polling itself writes nothing; the *logging of it* does. Fixed without touching the polling interval at all:
+  - Access logging is now off for the polling endpoints specifically (`nginx` regex location for `/api/current-playlist`, `/api/device-info` (and its QR sub-paths), and `/api/player/heartbeat`), in both installers.
+  - `gunicorn` no longer writes an access log at all (`--access-logfile` dropped); the error log is unaffected, so real problems still show up in `/var/log/lumina/error.log`.
+  - The systemd journal is now capped (`SystemMaxUse=50M`, `RuntimeMaxUse=16M` via a drop-in) rather than left to grow without bound — kept persistent, not volatile, since `journalctl` on a past boot has been this project's standard field-diagnosis tool throughout development.
+  - SQLite now runs in **WAL mode** with `synchronous=NORMAL`: each write appends to a separate log instead of rewriting the whole database file, and skips an `fsync` per transaction. Signage configuration is not financial data — losing the last few seconds of an in-flight write to a power loss is an acceptable trade for materially fewer disk writes on every save.
+- **[Medium] Two places read the database at the wrong path when `DATABASE_URL` was customized** — `/api/health`'s disk-usage report and the new backup export both hardcoded `BASE_DIR / "lumina.db"` instead of respecting the configured database URI. Harmless while `DATABASE_URL` went unused, but either would have silently operated on an empty, freshly-created file at the wrong path the moment anyone actually moved the database off the SD card — the exact scenario #11 introduced that variable to support. Both now resolve the real path from `SQLALCHEMY_DATABASE_URI`.
+
+---
+
 ## [1.10.1] — 2026-08-28
 
 ### Added

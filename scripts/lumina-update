@@ -155,7 +155,7 @@ cmd_apply() {
 # nor its grant is ever created.
 install_helpers() {
   local helper
-  for helper in lumina-net lumina-update lumina-power lumina-netwatch; do
+  for helper in lumina-net lumina-update lumina-power lumina-netwatch lumina-backup; do
     [[ -f "$INSTALL_DIR/scripts/$helper" ]] || continue
     install -m 0755 "$INSTALL_DIR/scripts/$helper" "/usr/local/sbin/$helper"
     sed -i 's/\r$//' "/usr/local/sbin/$helper"
@@ -167,12 +167,15 @@ install_helpers() {
   fi
 
   # Only the helpers the application itself invokes get a sudoers grant.
-  for helper in lumina-net lumina-update lumina-power; do
+  for helper in lumina-net lumina-update lumina-power lumina-backup; do
     [[ -f "/usr/local/sbin/$helper" ]] || continue
     printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/%s\n' \
       "$APP_USER" "$helper" > "/etc/sudoers.d/$helper"
     chmod 0440 "/etc/sudoers.d/$helper"
   done
+
+  mkdir -p /var/lib/lumina/restore-uploads
+  chown "$APP_USER:$APP_USER" /var/lib/lumina/restore-uploads
 }
 
 # static/vendor is gitignored, so it is absent from the downloaded archive and

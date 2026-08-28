@@ -1,4 +1,7 @@
 """API behaviour: authentication, role enforcement, and error paths."""
+import os
+import sys
+
 import pytest
 
 from conftest import login, make_user
@@ -30,6 +33,38 @@ def test_logout_ends_the_session(client):
     assert client.get("/api/me", json={}).status_code == 401
 
 
+def test_session_cookie_is_hardened(client):
+    """Regression test for #12 - there was previously no explicit cookie policy."""
+    import app as lumina
+    assert lumina.app.config["SESSION_COOKIE_HTTPONLY"] is True
+    assert lumina.app.config["SESSION_COOKIE_SAMESITE"] == "Lax"
+
+
+def test_repeated_failed_logins_are_throttled(client):
+    """Regression test for #12 - /login previously had no rate limit at all."""
+    for _ in range(10):
+        res = login(client, password="wrong")
+        assert res.status_code == 401
+    # The 11th attempt should be throttled rather than evaluated.
+    res = login(client, password="wrong")
+    assert res.status_code == 429
+    # Even the *correct* password is refused while throttled - the point is
+    # to slow down guessing, not just to reject bad guesses.
+    res = login(client)
+    assert res.status_code == 429
+
+
+def test_successful_login_clears_the_throttle_counter(client):
+    for _ in range(5):
+        login(client, password="wrong")
+    res = login(client)
+    assert res.status_code == 200
+    # Confirm the counter actually reset, not just that this one login worked.
+    for _ in range(9):
+        assert login(client, password="wrong").status_code == 401
+    assert login(client, password="wrong").status_code != 429
+
+
 # ── Endpoints the player relies on stay unauthenticated ───────────────────────
 
 def test_current_playlist_is_reachable_without_login(client):
@@ -41,6 +76,30 @@ def test_device_info_is_reachable_without_login(client):
     res = client.get("/api/device-info")
     assert res.status_code == 200
     assert "hostname" in res.get_json()
+
+
+def test_first_boot_password_is_shown_until_first_login_then_hidden(client, tmp_path):
+    """Regression coverage for #12's exposure window: shown before anyone has
+    ever logged in, gone the moment any login succeeds - not left as a
+    standing unauthenticated way to fetch the admin password."""
+    import app as lumina
+    marker = tmp_path / "first-boot-password"
+    marker.write_text("s3cr3t-generated\n")
+    original = lumina.FIRST_BOOT_PASSWORD_FILE
+    lumina.FIRST_BOOT_PASSWORD_FILE = str(marker)
+    try:
+        assert client.get("/api/device-info").get_json()["first_boot_password"] == "s3cr3t-generated"
+        login(client)  # admin/admin123 - unrelated to the marker's content
+        assert client.get("/api/device-info").get_json()["first_boot_password"] is None
+        assert not marker.exists()
+    finally:
+        lumina.FIRST_BOOT_PASSWORD_FILE = original
+
+
+def test_first_boot_password_is_none_when_no_marker_exists(client):
+    import app as lumina
+    assert lumina.first_boot_admin_password() is None
+    assert client.get("/api/device-info").get_json()["first_boot_password"] is None
 
 
 def test_wifi_qr_absent_without_a_setup_hotspot(client):
@@ -449,6 +508,202 @@ def test_timezone_set_rejects_unknown_zone(client):
     # 400 if the helper is present and validation runs, 503 if it is not
     # (dev machine) - either way it must not be accepted as valid.
     assert res.status_code in (400, 503)
+
+
+# ── Storage hygiene ───────────────────────────────────────────────────────────
+
+def test_storage_orphans_requires_admin(client):
+    login(client)
+    make_user(client, "ed10", "editor")
+    client.get("/logout")
+
+    login(client, "ed10", "secret123")
+    assert client.get("/api/storage/orphans", json={}).status_code == 403
+
+
+def test_storage_orphans_reports_none_on_a_clean_install(client):
+    login(client)
+    body = client.get("/api/storage/orphans").get_json()
+    assert body["count"] == 0
+    assert body["total_bytes"] == 0
+
+
+def test_storage_orphans_finds_an_unreferenced_file(client):
+    import app as lumina
+
+    login(client)
+    stray = lumina.UPLOAD_FOLDER / "not-in-the-database.jpg"
+    stray.write_bytes(b"orphaned")
+    try:
+        body = client.get("/api/storage/orphans").get_json()
+        assert body["count"] == 1
+        assert body["files"] == ["not-in-the-database.jpg"]
+        assert body["total_bytes"] == len(b"orphaned")
+    finally:
+        stray.unlink(missing_ok=True)
+
+
+def test_storage_orphans_does_not_flag_a_referenced_thumbnail(client):
+    """A video/PDF asset's thumbnail is a real file with no Asset row of its
+    own - only Asset.uri and Asset.thumbnail together define what is
+    referenced. This is the case the naive "just check uri" version gets
+    wrong."""
+    import app as lumina
+
+    login(client)
+    asset_res = client.post("/api/assets", json={"uri": "https://example.com"})
+    asset_id = asset_res.get_json()["id"]
+
+    thumb_dir = lumina.UPLOAD_FOLDER / "thumbnails"
+    thumb_dir.mkdir(exist_ok=True)
+    thumb_path = thumb_dir / f"{asset_id}.jpg"
+    thumb_path.write_bytes(b"thumb")
+    try:
+        with lumina.app.app_context():
+            asset = lumina.db.session.get(lumina.Asset, asset_id)
+            asset.thumbnail = f"/static/uploads/thumbnails/{asset_id}.jpg"
+            lumina.db.session.commit()
+
+        body = client.get("/api/storage/orphans").get_json()
+        assert body["count"] == 0
+    finally:
+        thumb_path.unlink(missing_ok=True)
+
+
+def test_storage_orphans_clean_removes_only_orphans(client):
+    import app as lumina
+
+    login(client)
+    stray = lumina.UPLOAD_FOLDER / "cleanup-me.jpg"
+    stray.write_bytes(b"xx")
+    try:
+        res = client.delete("/api/storage/orphans")
+        body = res.get_json()
+        assert body["removed"] == 1
+        assert body["freed_bytes"] == 2
+        assert not stray.exists()
+    finally:
+        stray.unlink(missing_ok=True)
+
+
+def test_upload_is_refused_when_disk_is_nearly_full(client, monkeypatch):
+    """Regression coverage for #24 - a full disk previously failed with
+    whatever the OS write error happened to be, mid-write, on the same
+    filesystem SQLite lives on."""
+    import io as _io
+    import app as lumina
+    from collections import namedtuple
+
+    Usage = namedtuple("Usage", "total used free")
+    monkeypatch.setattr(lumina.shutil, "disk_usage", lambda path: Usage(100, 99, 1))
+
+    login(client)
+    data = {"file": (_io.BytesIO(b"fake image bytes"), "photo.jpg")}
+    res = client.post("/api/assets", data=data, content_type="multipart/form-data")
+    assert res.status_code == 507
+
+
+# ── Backup and restore ────────────────────────────────────────────────────────
+
+def test_backup_export_requires_admin(client):
+    login(client)
+    make_user(client, "ed8", "editor")
+    client.get("/logout")
+
+    login(client, "ed8", "secret123")
+    assert client.get("/api/backup/export", json={}).status_code == 403
+
+
+def test_backup_export_produces_a_zip_containing_the_database(client):
+    import zipfile
+    import io as _io
+
+    login(client)
+    res = client.get("/api/backup/export")
+    assert res.status_code == 200
+    assert res.mimetype == "application/zip"
+    with zipfile.ZipFile(_io.BytesIO(res.data)) as zf:
+        assert "lumina.db" in zf.namelist()
+
+
+def test_backup_export_reflects_current_data(client):
+    """The exported db is a real, queryable snapshot - not an empty shell."""
+    import zipfile
+    import io as _io
+    import sqlite3
+    import tempfile as _tempfile
+
+    login(client)
+    client.post("/api/assets", json={"name": "in the backup", "uri": "https://example.com"})
+
+    res = client.get("/api/backup/export")
+    with zipfile.ZipFile(_io.BytesIO(res.data)) as zf:
+        db_bytes = zf.read("lumina.db")
+
+    with _tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        f.write(db_bytes)
+        path = f.name
+    con = sqlite3.connect(path)
+    try:
+        names = [r[0] for r in con.execute("SELECT name FROM assets").fetchall()]
+        assert "in the backup" in names
+    finally:
+        con.close()  # must close before removing - Windows locks open files
+        os.remove(path)
+
+
+def test_backup_import_is_refused_without_the_helper(client):
+    import io as _io
+
+    login(client)
+    data = {"file": (_io.BytesIO(b"not a real zip"), "backup.zip")}
+    res = client.post("/api/backup/import", data=data, content_type="multipart/form-data")
+    assert res.status_code == 503
+
+
+def test_backup_import_requires_admin(client):
+    login(client)
+    make_user(client, "ed9", "editor")
+    client.get("/logout")
+
+    login(client, "ed9", "secret123")
+    assert client.post("/api/backup/import", json={}).status_code == 403
+
+
+def test_backup_import_rejects_non_zip_filename(client):
+    import app as lumina
+    import io as _io
+
+    login(client)
+    original = lumina.BACKUP_HELPER
+    lumina.BACKUP_HELPER = sys.executable  # any real, existing file
+    try:
+        data = {"file": (_io.BytesIO(b"whatever"), "notes.txt")}
+        res = client.post("/api/backup/import", data=data, content_type="multipart/form-data")
+        assert res.status_code == 400
+    finally:
+        lumina.BACKUP_HELPER = original
+
+
+def test_backup_import_rejects_a_zip_with_no_database(client, tmp_path):
+    import app as lumina
+    import io as _io
+    import zipfile
+
+    login(client)
+    original = lumina.BACKUP_HELPER
+    lumina.BACKUP_HELPER = sys.executable
+    try:
+        buf = _io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("uploads/photo.jpg", b"not really a photo")
+        buf.seek(0)
+        data = {"file": (buf, "backup.zip")}
+        res = client.post("/api/backup/import", data=data, content_type="multipart/form-data")
+        assert res.status_code == 400
+        assert "lumina.db" in res.get_json()["error"]
+    finally:
+        lumina.BACKUP_HELPER = original
 
 
 # ── Updates ───────────────────────────────────────────────────────────────────

@@ -227,6 +227,19 @@ SUDOERS
   ok "Power control helper installed"
 fi
 
+# Backup/restore helper, invoked from the admin UI through its own scoped grant.
+if [ -f "$INSTALL_DIR/scripts/lumina-backup" ]; then
+  install -m 0755 "$INSTALL_DIR/scripts/lumina-backup" /usr/local/sbin/lumina-backup
+  sed -i 's/\r$//' /usr/local/sbin/lumina-backup
+  cat > /etc/sudoers.d/lumina-backup << SUDOERS
+$APP_USER ALL=(root) NOPASSWD: /usr/local/sbin/lumina-backup
+SUDOERS
+  chmod 0440 /etc/sudoers.d/lumina-backup
+  mkdir -p /var/lib/lumina/restore-uploads
+  chown "$APP_USER:$APP_USER" /var/lib/lumina/restore-uploads
+  ok "Backup/restore helper installed"
+fi
+
 # Vendor PDF.js so PDF assets render without internet at playback time.
 PDFJS_DIR="$INSTALL_DIR/static/vendor/pdfjs"
 mkdir -p "$PDFJS_DIR"
@@ -268,7 +281,7 @@ ok "Environment file created"
 cp "$INSTALL_DIR/lumina.service" /etc/systemd/system/lumina.service
 sed -i "s|Environment=SECRET_KEY=CHANGE_ME_IN_PRODUCTION|Environment=SECRET_KEY=${SECRET_KEY}|g" /etc/systemd/system/lumina.service
 sed -i "s|Environment=PORT=8080|Environment=PORT=${APP_PORT}|g" /etc/systemd/system/lumina.service
-sed -i "s|--bind 0.0.0.0:8080|--bind 0.0.0.0:${APP_PORT}|g" /etc/systemd/system/lumina.service
+sed -i "s|--bind 127.0.0.1:8080|--bind 127.0.0.1:${APP_PORT}|g" /etc/systemd/system/lumina.service
 ok "Systemd service configured"
 
 # â”€â”€ Nginx â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -303,6 +316,18 @@ server {
         alias ${INSTALL_DIR}/static/;
         expires 7d;
         add_header Cache-Control "public, immutable";
+    }
+
+    # The kiosk player polls these every few seconds around the clock; logging
+    # each hit is pure noise and unnecessary disk I/O (#11).
+    location ~ ^/api/(current-playlist|device-info|player/heartbeat) {
+        access_log off;
+        proxy_pass http://127.0.0.1:${APP_PORT};
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_buffering off;
     }
 
     location / {
@@ -351,14 +376,23 @@ header "Initializing database"
 if [ "$UPGRADE" = true ] && [ -f "$INSTALL_DIR/lumina.db" ]; then
   ok "Existing database preserved â€” skipping initialization"
 else
+  # A random per-device admin password instead of the same admin/admin123 on
+  # every install (#12).
+  ADMIN_PASSWORD="${LUMINA_ADMIN_PASSWORD:-$(openssl rand -hex 6)}"
   cd "$INSTALL_DIR"
-  sudo -u "$APP_USER" "$INSTALL_DIR/venv/bin/python" -c "
+  sudo -u "$APP_USER" LUMINA_ADMIN_PASSWORD="$ADMIN_PASSWORD" "$INSTALL_DIR/venv/bin/python" -c "
 import sys; sys.path.insert(0, '${INSTALL_DIR}')
 from app import init_db
 init_db()
 print('Database initialized')
 "
-  ok "Database created with default admin user"
+  ok "Database created with a random admin password"
+
+  # The admin UI shows this once, unauthenticated, until the first login.
+  mkdir -p /etc/lumina
+  printf '%s\n' "$ADMIN_PASSWORD" > /etc/lumina/first-boot-password
+  chmod 0600 /etc/lumina/first-boot-password
+  chown "$APP_USER:$APP_USER" /etc/lumina/first-boot-password
 fi
 
 # â”€â”€ Start services â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -437,10 +471,10 @@ cat << DONE
   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
   â”‚  URL      â†’  http://${SERVER_IP}
   â”‚  Username â†’  admin
-  â”‚  Password â†’  admin123
+  │  Password →  ${ADMIN_PASSWORD:-see /etc/lumina/first-boot-password}
   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
-  ${YELLOW}âš   Change the default password immediately after login!${RESET}
+  ${YELLOW}⚠  This password was generated for this device — change it after login if you'd like a memorable one.${RESET}
 
   ${BOLD}Useful commands:${RESET}
     Status   : sudo systemctl status lumina

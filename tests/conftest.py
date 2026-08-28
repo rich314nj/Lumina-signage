@@ -34,6 +34,9 @@ def client():
         lumina.db.session.commit()
 
     lumina.app.config["TESTING"] = True
+    # Module-level state that would otherwise leak between tests sharing the
+    # same client "IP" (Flask's test client always reports 127.0.0.1).
+    lumina._login_failures.clear()
     with lumina.app.test_client() as test_client:
         yield test_client
 

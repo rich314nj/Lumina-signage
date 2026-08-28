@@ -4,7 +4,7 @@ Self-hosted digital signage for Raspberry Pi 4/5. Positioned as a direct
 replacement for Anthias/Screenly OSE, with the differentiator being **setup and
 network management that a non-technical person can do without a keyboard**.
 
-Repo: `rich314nj/Lumina-signage` · Current version: **1.10.1**
+Repo: `rich314nj/Lumina-signage` · Current version: **1.11.0**
 
 ---
 
@@ -175,16 +175,34 @@ Trust before features: the product's problem is reliability, not capability.
   the installer generates is invisible to updates — check the update path
   when changing a generated file.**
 
-### Tier 4 — Hardening ← next up
-- #11 SD card wear · #12 per-device credentials · #23 backup/restore ·
-  #24 storage hygiene
-- **#11 direction from the project owner**: responsiveness and card life are
-  NOT a trade-off — polling writes nothing, *logging* it does (nginx +
-  gunicorn both log every request; ~10 req/min from polling + heartbeat is
-  ~29,000 log writes/day). Fix logging first (silence access logs for poll
-  endpoints, cap the journal) and 15s polling can stay as-is; SSE is the real
-  long-term improvement (nginx already has `proxy_buffering off`; needs
-  threaded gunicorn workers, not sync). Full analysis on the issue.
+### Tier 4 — Hardening ✅ done in 1.11.0
+- ~~#11 SD card wear~~ — the fix was logging, not polling frequency: nginx
+  `access_log off` for the polling endpoints, gunicorn access log dropped
+  entirely, journald capped (persistent, not volatile — `journalctl` on a
+  past boot is this project's standard field-diagnosis tool), SQLite WAL +
+  `synchronous=NORMAL`. 15s polling untouched. **Still open, deliberately
+  deferred**: SSE as the real long-term fix (nginx already has
+  `proxy_buffering off`; needs threaded gunicorn workers, not sync) — revisit
+  if #11's logging fix ever proves insufficient in the field.
+- ~~#12 per-device credentials~~ — random admin password generated per fresh
+  install, shown once on the setup screen, deleted the moment any login
+  succeeds (`/etc/lumina/first-boot-password`, same exposure pattern as the
+  hotspot password); login throttled (10/5min per IP via `ProxyFix`);
+  session cookie `HttpOnly`+`SameSite=Lax`; gunicorn bound to `127.0.0.1`
+  instead of `0.0.0.0`. HTTPS deliberately out of scope (see the issue).
+- ~~#23 backup/restore~~ — export/import on the System page, new
+  `scripts/lumina-backup` helper using the same detach-via-`systemd-run`
+  pattern as `lumina-update`, previous state backed up before any restore.
+- ~~#24 storage hygiene~~ — orphan file detection (report-then-delete, two
+  separate calls) correctly checks both `Asset.uri` *and* `Asset.thumbnail`;
+  uploads refused with `507` below a free-space floor.
+- **Bug found while building #23**: `/api/health`'s disk report and the new
+  backup export both hardcoded `BASE_DIR / "lumina.db"` instead of reading
+  `SQLALCHEMY_DATABASE_URI` back — harmless until `DATABASE_URL` is actually
+  used to move the db off the SD card (which #11 introduced that var to
+  support), at which point both would have silently operated on the wrong,
+  empty file. Fixed via a shared `database_file_path()` helper. **Grep for
+  `BASE_DIR / "lumina.db"` before adding a third call site.**
 
 ### Tier 5 — Features, in market-value order
 - #17 rotation/portrait (biggest market unlock)
