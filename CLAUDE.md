@@ -205,8 +205,8 @@ Trust before features: the product's problem is reliability, not capability.
 - ~~#23 backup/restore~~ — export/import on the System page, new
   `scripts/lumina-backup` helper using the same detach-via-`systemd-run`
   pattern as `lumina-update`, previous state backed up before any restore.
-  **Not yet hardware-verified** — needs a real export→restore round-trip on
-  a device.
+  **Hardware-verified 2026-08-28** — real export→restore round-trip
+  confirmed successful on device.
 - ~~#24 storage hygiene~~ — orphan file detection (report-then-delete, two
   separate calls) correctly checks both `Asset.uri` *and* `Asset.thumbnail`;
   uploads refused with `507` below a free-space floor. **Not yet
@@ -275,10 +275,9 @@ Trust before features: the product's problem is reliability, not capability.
   #20 multi-zone layouts
 
 ### Hardware verification — outstanding
-Everything through the morning quick-wins batch (#42, #38 item 1, #16) plus
-#3 and #7 is now hardware-verified (2026-08-27/28) — see the strikethrough
-notes above and in Tier 5. What's left, all from Tier 4:
-- #23 backup/restore — no real device round-trip yet
+Everything through the morning quick-wins batch (#42, #38 item 1, #16),
+#3, #7, and now #23 (backup/restore) is hardware-verified (2026-08-27/28) —
+see the strikethrough notes above and in Tier 5. What's left, both Tier 4:
 - #24 storage hygiene — orphan scan/clean not yet run on a device
 - #11 SD-card wear — nothing to click; verify by absence (SD card should
   simply wear less over time / `journalctl` volume stays low)
