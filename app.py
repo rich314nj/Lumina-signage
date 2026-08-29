@@ -1440,6 +1440,89 @@ def api_system_timezone_set():
     return jsonify({"success": True, "timezone": tz})
 
 
+# ── API: Display rotation (Admin) ─────────────────────────────────────────────
+
+DISPLAY_HELPER = "/usr/local/sbin/lumina-display"
+DISPLAY_CONF = "/etc/lumina/display.conf"
+# install_rpi.sh only writes this unit on the Cage appliance path — a
+# Raspberry Pi Desktop install uses XDG autostart instead and never creates
+# it. lumina-display always applies a change by restarting this exact
+# service, so rotation must never be advertised as supported without it,
+# or a Desktop install would persist the setting and then fail restarting
+# a service that was never installed.
+KIOSK_SERVICE_UNIT = "/etc/systemd/system/lumina-kiosk.service"
+VALID_ROTATIONS = ("0", "90", "180", "270")
+
+
+def current_display_rotation():
+    """Reads the same file scripts/lumina-kiosk applies on its own next
+    start — reading needs no privilege (the file is world-readable, same
+    exposure pattern as the timezone/clock reads); only writing it goes
+    through the helper. Never sourced - parsed and validated exactly like
+    lumina-kiosk parses it (strictly the FIRST line, nothing scanned
+    further into the file, on both sides), and defaults to "0" the same
+    way for a missing, unreadable, or malformed file, so this always
+    reflects what the kiosk will actually do."""
+    text = read_first_line(DISPLAY_CONF) or ""
+    value = parse_kv(text).get("ROTATION", "0")
+    return value if value in VALID_ROTATIONS else "0"
+
+
+def display_rotation_supported():
+    """The helper existing is not enough - it only writes the config file
+    and restarts the kiosk. Whether rotation actually DOES anything depends
+    on wlr-randr being installed, which is a best-effort apt install on a
+    device that updated from before #17 existed (see lumina-update) and can
+    genuinely be missing. It also depends on the appliance kiosk unit
+    actually being installed — a Raspberry Pi Desktop install (XDG
+    autostart, not Cage) never creates it, so restarting it would simply
+    fail. This deliberately does not add Desktop-session rotation support;
+    it only keeps the feature from being advertised where applying it
+    would persist a setting and then fail restarting a service that
+    doesn't exist."""
+    return (
+        os.path.exists(DISPLAY_HELPER)
+        and shutil.which("wlr-randr") is not None
+        and os.path.exists(KIOSK_SERVICE_UNIT)
+    )
+
+
+@app.route("/api/system/display")
+@login_required
+@role_required("admin")
+def api_system_display():
+    return jsonify({
+        "rotation": current_display_rotation(),
+        "supported": display_rotation_supported(),
+    })
+
+
+@app.route("/api/system/display", methods=["POST"])
+@login_required
+@role_required("admin")
+def api_system_display_set():
+    if not display_rotation_supported():
+        return jsonify({"error": "Display rotation is not available on this system"}), 503
+    data = get_json_dict()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
+    # Accept an int or a numeric string, but only ever pass one of the four
+    # known-good values on to the helper - no arbitrary argument reaches it.
+    rotation = str(data.get("rotation", "")).strip()
+    if rotation not in VALID_ROTATIONS:
+        return jsonify({
+            "error": f"rotation must be one of: {', '.join(VALID_ROTATIONS)}"
+        }), 400
+
+    if os.geteuid() == 0:
+        rc, out, err = run_cmd([DISPLAY_HELPER, "rotate", rotation], timeout=20)
+    else:
+        rc, out, err = run_cmd(["sudo", "-n", DISPLAY_HELPER, "rotate", rotation], timeout=20)
+    if rc != 0:
+        return jsonify({"error": err or out or "Could not change display rotation"}), 502
+    return jsonify({"success": True, "rotation": rotation})
+
+
 # ── API: Storage hygiene (Admin) ──────────────────────────────────────────────
 
 # A file must be at least this old before it can ever be reported or deleted

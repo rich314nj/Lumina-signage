@@ -39,10 +39,10 @@ fi
 
 rm -f /usr/local/sbin/lumina-net /usr/local/sbin/lumina-update
 rm -f /usr/local/sbin/lumina-power /usr/local/sbin/lumina-netwatch
-rm -f /usr/local/sbin/lumina-backup
+rm -f /usr/local/sbin/lumina-backup /usr/local/sbin/lumina-display
 rm -f /usr/local/bin/lumina-kiosk
 rm -f /etc/sudoers.d/lumina-net /etc/sudoers.d/lumina-update
-rm -f /etc/sudoers.d/lumina-power /etc/sudoers.d/lumina-backup
+rm -f /etc/sudoers.d/lumina-power /etc/sudoers.d/lumina-backup /etc/sudoers.d/lumina-display
 rm -rf /var/lib/lumina
 rm -rf /etc/lumina
 rm -f /etc/systemd/journald.conf.d/lumina.conf

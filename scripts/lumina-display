@@ -1,0 +1,49 @@
+#!/bin/bash
+set -euo pipefail
+
+# Screen rotation helper for LuminaShow (#17).
+#
+# Installed to /usr/local/sbin/lumina-display and invoked through its own
+# scoped sudoers grant, like scripts/lumina-net. This helper only persists
+# the chosen rotation and restarts the kiosk — it does not run wlr-randr
+# itself, because it has no Wayland session to talk to (that only exists
+# inside the cage session lumina-kiosk runs under). lumina-kiosk reads the
+# file this writes and applies the actual transform on its own next start.
+
+CONF_FILE="/etc/lumina/display.conf"
+
+die() { echo "$1" >&2; exit 1; }
+
+valid_rotation() {
+  case "$1" in
+    0|90|180|270) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  rotate)
+    rotation="${1:-}"
+    valid_rotation "$rotation" || die "rotation must be one of: 0 90 180 270"
+
+    mkdir -p "$(dirname "$CONF_FILE")"
+    tmp="$(mktemp "${CONF_FILE}.XXXXXX")"
+    printf 'ROTATION=%s\n' "$rotation" > "$tmp"
+    chmod 0644 "$tmp"
+    # Atomic on the same filesystem - the kiosk script (or anything else
+    # reading this file) never sees a partially-written value.
+    mv "$tmp" "$CONF_FILE"
+
+    if systemctl restart lumina-kiosk.service; then
+      echo "rotation set to ${rotation} (display restarting)"
+    else
+      die "rotation saved, but the display failed to restart"
+    fi
+    ;;
+  *)
+    die "usage: lumina-display {rotate} <0|90|180|270>"
+    ;;
+esac

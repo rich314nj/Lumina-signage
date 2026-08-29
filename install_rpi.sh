@@ -146,7 +146,8 @@ if [[ "$SKIP_APT" != true ]]; then
     python3 python3-pip python3-venv python3-dev \
     build-essential ffmpeg nginx imagemagick \
     curl wget git rsync openssl \
-    libssl-dev libjpeg-dev libpng-dev libwebp-dev
+    libssl-dev libjpeg-dev libpng-dev libwebp-dev \
+    wlr-randr
 fi
 
 if ! id "$APP_USER" >/dev/null 2>&1; then
@@ -327,6 +328,19 @@ EOF
   chmod 0440 /etc/sudoers.d/lumina-backup
   mkdir -p /var/lib/lumina/restore-uploads
   chown "$APP_USER:$APP_USER" /var/lib/lumina/restore-uploads
+fi
+
+# Screen rotation helper (#17), invoked from the admin UI through its own
+# scoped grant. Only persists the setting and restarts the kiosk — the
+# actual wlr-randr transform is applied by lumina-kiosk itself, which is
+# the only thing that inherits a Wayland session to apply it through.
+if [[ -f "$INSTALL_DIR/scripts/lumina-display" ]]; then
+  install -m 0755 "$INSTALL_DIR/scripts/lumina-display" /usr/local/sbin/lumina-display
+  sed -i 's/\r$//' /usr/local/sbin/lumina-display
+  cat > /etc/sudoers.d/lumina-display <<EOF
+$APP_USER ALL=(root) NOPASSWD: /usr/local/sbin/lumina-display
+EOF
+  chmod 0440 /etc/sudoers.d/lumina-display
 fi
 
 # Vendor PDF.js so PDF assets render with no internet at playback time.

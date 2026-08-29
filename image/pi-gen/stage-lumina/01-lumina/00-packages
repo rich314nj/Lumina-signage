@@ -25,3 +25,4 @@ cage
 chromium-browser
 fonts-dejavu-core
 libgl1-mesa-dri
+wlr-randr
