@@ -567,32 +567,48 @@ def _mock_wlr_randr_present(monkeypatch, lumina):
     )
 
 
+def _mock_display_fully_supported(monkeypatch, lumina):
+    """Sets all three conditions display_rotation_supported() requires:
+    the helper, wlr-randr, and the appliance kiosk systemd unit. Callers
+    still swap lumina.DISPLAY_HELPER themselves (it needs restoring in a
+    finally block alongside the rest of the test's setup)."""
+    _mock_wlr_randr_present(monkeypatch, lumina)
+    monkeypatch.setattr(lumina, "KIOSK_SERVICE_UNIT", sys.executable)
+
+
 def test_display_post_is_refused_without_the_helper(client):
     login(client)
     res = client.post("/api/system/display", json={"rotation": "90"})
     assert res.status_code == 503
 
 
-def test_display_supported_requires_both_the_helper_and_wlr_randr(client, monkeypatch):
+def test_display_supported_requires_the_helper_wlr_randr_and_kiosk_unit(client, monkeypatch):
     """The helper only writes the config and restarts the kiosk - whether
     rotation does anything at all also depends on wlr-randr being
-    installed, which is a best-effort apt install on an updated device and
-    can genuinely be absent. Neither one alone should report supported
-    (#17)."""
+    installed (a best-effort apt install on an updated device that can
+    genuinely be absent) AND on the appliance kiosk unit actually being
+    installed (a Raspberry Pi Desktop install uses XDG autostart instead
+    and never creates it - lumina-display always restarts this exact
+    service). None of the three alone should report supported (#17)."""
     import app as lumina
 
     login(client)
     original_helper = lumina.DISPLAY_HELPER
     try:
-        # Neither present (the default on a dev machine/CI runner).
+        # None present (the default on a dev machine/CI runner).
         assert client.get("/api/system/display").get_json()["supported"] is False
 
-        # Helper present, wlr-randr still absent.
+        # Helper present, nothing else.
         lumina.DISPLAY_HELPER = sys.executable
         assert client.get("/api/system/display").get_json()["supported"] is False
 
-        # Both present.
+        # Helper + wlr-randr present, kiosk unit still absent - this is the
+        # Desktop-install case the fix targets.
         _mock_wlr_randr_present(monkeypatch, lumina)
+        assert client.get("/api/system/display").get_json()["supported"] is False
+
+        # All three present.
+        monkeypatch.setattr(lumina, "KIOSK_SERVICE_UNIT", sys.executable)
         assert client.get("/api/system/display").get_json()["supported"] is True
     finally:
         lumina.DISPLAY_HELPER = original_helper
@@ -615,13 +631,32 @@ def test_display_post_is_refused_when_wlr_randr_is_missing(client):
         lumina.DISPLAY_HELPER = original_helper
 
 
+def test_display_post_is_refused_on_a_desktop_install_without_the_kiosk_unit(client, monkeypatch):
+    """A Raspberry Pi Desktop install (XDG autostart) has the helper and
+    could have wlr-randr, but install_rpi.sh never creates
+    lumina-kiosk.service on that path - lumina-display always restarts
+    that exact service, so POST must refuse rather than persist a setting
+    and then fail restarting a service that doesn't exist (#17)."""
+    import app as lumina
+
+    login(client)
+    original_helper = lumina.DISPLAY_HELPER
+    lumina.DISPLAY_HELPER = sys.executable
+    _mock_wlr_randr_present(monkeypatch, lumina)  # kiosk unit deliberately not mocked
+    try:
+        res = client.post("/api/system/display", json={"rotation": "90"})
+        assert res.status_code == 503
+    finally:
+        lumina.DISPLAY_HELPER = original_helper
+
+
 def test_display_post_rejects_an_invalid_rotation(client, monkeypatch):
     import app as lumina
 
     login(client)
     original_helper = lumina.DISPLAY_HELPER
     lumina.DISPLAY_HELPER = sys.executable  # any real, existing file
-    _mock_wlr_randr_present(monkeypatch, lumina)
+    _mock_display_fully_supported(monkeypatch, lumina)
     try:
         for bad in ("45", "-90", "360", "ninety", ""):
             res = client.post("/api/system/display", json={"rotation": bad})
@@ -636,7 +671,7 @@ def test_display_post_accepts_each_valid_rotation(client, monkeypatch):
     login(client)
     original_helper = lumina.DISPLAY_HELPER
     lumina.DISPLAY_HELPER = sys.executable  # any real, existing file
-    _mock_wlr_randr_present(monkeypatch, lumina)
+    _mock_display_fully_supported(monkeypatch, lumina)
     # os.geteuid() doesn't exist on Windows - this is the first test in the
     # suite to reach a helper's rc==0 branch (others short-circuit earlier),
     # so it's the first to hit this pre-existing, platform-specific call.
@@ -659,7 +694,7 @@ def test_display_post_accepts_an_integer_rotation(client, monkeypatch):
     login(client)
     original_helper = lumina.DISPLAY_HELPER
     lumina.DISPLAY_HELPER = sys.executable
-    _mock_wlr_randr_present(monkeypatch, lumina)
+    _mock_display_fully_supported(monkeypatch, lumina)
     monkeypatch.setattr(lumina.os, "geteuid", lambda: 1000, raising=False)
     monkeypatch.setattr(lumina, "run_cmd", lambda *a, **k: (0, "ok", ""))
     try:
@@ -675,7 +710,7 @@ def test_display_post_surfaces_a_helper_failure(client, monkeypatch):
     login(client)
     original_helper = lumina.DISPLAY_HELPER
     lumina.DISPLAY_HELPER = sys.executable
-    _mock_wlr_randr_present(monkeypatch, lumina)
+    _mock_display_fully_supported(monkeypatch, lumina)
     monkeypatch.setattr(lumina.os, "geteuid", lambda: 1000, raising=False)
     monkeypatch.setattr(lumina, "run_cmd", lambda *a, **k: (1, "", "display failed to restart"))
     try:

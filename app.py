@@ -1444,6 +1444,13 @@ def api_system_timezone_set():
 
 DISPLAY_HELPER = "/usr/local/sbin/lumina-display"
 DISPLAY_CONF = "/etc/lumina/display.conf"
+# install_rpi.sh only writes this unit on the Cage appliance path — a
+# Raspberry Pi Desktop install uses XDG autostart instead and never creates
+# it. lumina-display always applies a change by restarting this exact
+# service, so rotation must never be advertised as supported without it,
+# or a Desktop install would persist the setting and then fail restarting
+# a service that was never installed.
+KIOSK_SERVICE_UNIT = "/etc/systemd/system/lumina-kiosk.service"
 VALID_ROTATIONS = ("0", "90", "180", "270")
 
 
@@ -1466,9 +1473,18 @@ def display_rotation_supported():
     and restarts the kiosk. Whether rotation actually DOES anything depends
     on wlr-randr being installed, which is a best-effort apt install on a
     device that updated from before #17 existed (see lumina-update) and can
-    genuinely be missing. Reporting "supported" without checking this would
-    let POST return success while the kiosk silently starts unrotated."""
-    return os.path.exists(DISPLAY_HELPER) and shutil.which("wlr-randr") is not None
+    genuinely be missing. It also depends on the appliance kiosk unit
+    actually being installed — a Raspberry Pi Desktop install (XDG
+    autostart, not Cage) never creates it, so restarting it would simply
+    fail. This deliberately does not add Desktop-session rotation support;
+    it only keeps the feature from being advertised where applying it
+    would persist a setting and then fail restarting a service that
+    doesn't exist."""
+    return (
+        os.path.exists(DISPLAY_HELPER)
+        and shutil.which("wlr-randr") is not None
+        and os.path.exists(KIOSK_SERVICE_UNIT)
+    )
 
 
 @app.route("/api/system/display")
